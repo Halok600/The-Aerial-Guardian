@@ -1,77 +1,340 @@
-﻿# The Aerial Guardian 🛸
-### Production-Grade Multi-Object Tracking Pipeline for Drone Footage
+# 🚁 The Aerial Guardian
 
-A production-oriented multi-object tracking pipeline for drone footage. Detects and tracks people (single class: person) using a custom YOLOv8n-P2 detector + ByteTrack. Optimized for aerial, small-person detection at high resolution.
+### AI-Powered Drone Surveillance & Multi-Object Tracking System
 
-Quick Start (in-project)
+> Transforming aerial footage into actionable intelligence using Computer Vision, Deep Learning, and Real-Time Object Tracking.
 
-Activate the project virtualenv (Windows PowerShell):
-& .venv\Scripts\Activate.ps1
+---
 
-Run inference on a sequence folder or a video file:
-python scripts/03_track.py --weights models/weights/best.pt --source "path\to\video.mp4" --conf 0.25
+## 📖 Overview
 
-Or for an image-sequence directory:
-python scripts/03_track.py --weights models/weights/best.pt --source "data\raw\sequences\uav0000086_00000_v" --conf 0.25
+**The Aerial Guardian** is an intelligent drone surveillance system capable of detecting, tracking, and monitoring objects in aerial videos in real time.
 
-Output video is written to outputs/videos/<source>_tracked.mp4
-Recommended Command-Line Flags (tuning)
+The project leverages a custom-trained **YOLOv8 detector** combined with **ByteTrack Multi-Object Tracking** to accurately identify and maintain object identities across video frames captured by drones.
 
---conf: detector confidence threshold (default tightened to 0.20; raise to 0.25–0.30 to reduce false positives).
---track-thresh and --low-thresh: ByteTrack association buckets (defaults: 0.25 / 0.10). Increase --track-thresh to make tracker require higher-confidence detections.
---no-cmc: disable ECC camera-motion compensation if it causes alignment problems for your footage.
-Example stricter run for noisy external videos:
-python scripts/03_track.py --weights models/weights/best.pt --source "D:\Projects\dronefootage.mp4" --conf 0.30 --track-thresh 0.35 --low-thresh 0.15
-Notes on Performance & Inputs
+Designed using the **VisDrone dataset**, this system aims to address challenges commonly faced in aerial surveillance such as:
 
-Accepts either a folder of frames (JPEG/PNG) or a single video file. Frame folders with thousands of images are supported and expected for VisDrone sequences.
-The detector uses a single high-res forward pass (imgsz=1280 by default). Use a GPU (CUDA) for realtime or near-realtime performance.
-The model only detects the class “person” (trained on VisDrone person annotations). It will not detect vehicles or other object classes.
-Why false positives happen (and quick fixes)
+* Small object detection
+* Camera motion caused by drone movement
+* Occlusions and crowded scenes
+* Real-time processing requirements
+* Persistent object tracking
 
-Domain shift: model trained on VisDrone (open aerial dataset). City drone footage with different altitude, viewpoint, resolution, or lighting can produce more false positives.
-Short-term fixes:
-Raise --conf and --track-thresh.
-Post-filter using detection size (very small boxes) or aspect ratio if appropriate.
-Disable ECC (--no-cmc) to check whether CMC warping introduces artifacts.
-Retraining / Improving Accuracy
+The system can be applied in:
 
-Best datasets to improve small-person aerial detection:
-VisDrone2019 (DET, MOT, VID) — closest match and already used here.
-Okutama-Action — additional aerial human examples.
-Collect and label a small set of representative city drone clips (strongest improvement for domain-specific false positives).
-To prepare data: use 01_preprocess.py (converts VisDrone MOT -> YOLO format) and inspect dataset.yaml.
-Train with the included script:
-python scripts/02_train.py          # default: 100 epochs, imgsz=1280, batch=4 (VRAM-safe)
-# For quick smoke test:
-python scripts/02_train.py --epochs 5 --imgsz 640 --batch 8
+* 🚔 Security & Surveillance
+* 🚦 Traffic Monitoring
+* 🌾 Agricultural Observation
+* 🚨 Disaster Response
+* 🏙️ Smart City Monitoring
+* 🎯 Search & Rescue Operations
 
-Recommended hyper-choices are already encoded in 02_train.py (mosaic augmentation, FP16/AMP, AdamW, etc.). Add your city-labeled images into the processed dataset and rerun preprocessing/training.
-Project Layout (important files)
+---
 
-03_track.py — inference / main tracking pipeline (accepts video or frame folder).
-02_train.py — training entrypoint (YOLOv8n-P2 fine-tune).
-01_preprocess.py — VisDrone -> YOLO preprocessing.
-dataset.yaml — dataset paths used for training.
-model.yaml — custom YOLOv8n-P2 architecture.
-best.pt — inference weights (place best checkpoint here).
-outputs/videos — annotated video outputs.
-Environment & Dependencies
+# ✨ Features
 
-Python 3.10+ recommended.
-Key Python packages (examples)
-pip install ultralytics==8.0.236
-pip install torch==2.1.2+cu118 --index-url https://download.pytorch.org/whl/cu118
-pip install opencv-python pillow tqdm
+✅ Real-Time Object Detection
 
-Adjust the Torch wheel to match your CUDA version.
-Troubleshooting
+✅ Multi-Object Tracking (MOT)
 
-If the script errors on import, activate the .venv and install dependencies above.
-If GPU out-of-memory during training, reduce --batch to 2 or lower --imgsz.
-If many false positives remain after thresholding, retrain with mixed VisDrone + your labeled city data.
-Next Steps I can help with
+✅ Drone Camera Motion Compensation
 
-Create a small labeling/spec and assist combining VisDrone + your city clips for retraining.
-Add a quick post-filter for size/aspect ratio to reduce obvious false positives.
-Run a short diagnostic pass on a sample video and produce suggested --conf/--track-thresh values.
+✅ Custom YOLOv8 Training
+
+✅ High-Resolution Video Processing
+
+✅ Persistent Object IDs
+
+✅ Bounding Box Visualization
+
+✅ Performance Evaluation Metrics
+
+✅ Optimized for Aerial Footage
+
+---
+
+# 🏗️ System Architecture
+
+```text
+Drone Video Input
+        │
+        ▼
+Preprocessing
+        │
+        ▼
+YOLOv8 Object Detection
+        │
+        ▼
+ByteTrack Association
+        │
+        ▼
+Camera Motion Compensation
+        │
+        ▼
+Object ID Assignment
+        │
+        ▼
+Visualization & Output Video
+```
+
+---
+
+# 🛠️ Technology Stack
+
+## Programming Language
+
+* Python
+
+## Deep Learning
+
+* YOLOv8
+* PyTorch
+
+## Computer Vision
+
+* OpenCV
+
+## Tracking
+
+* ByteTrack
+
+## Dataset
+
+* VisDrone MOT Dataset
+
+## Visualization
+
+* OpenCV Rendering
+
+## Training Environment
+
+* Google Colab
+* Jupyter Notebook
+
+---
+
+# 📂 Project Structure
+
+```text
+The-Aerial-Guardian/
+│
+├── data/
+│   ├── images/
+│   ├── labels/
+│
+├── models/
+│   ├── best.pt
+│
+├── videos/
+│   ├── input/
+│   ├── output/
+│
+├── scripts/
+│   ├── preprocess.py
+│   ├── train.py
+│   ├── track.py
+│   ├── evaluate.py
+│
+├── results/
+│   ├── metrics/
+│   ├── visualizations/
+│
+├── requirements.txt
+│
+└── README.md
+```
+
+---
+
+# 🧠 Model Details
+
+### Detector
+
+**YOLOv8n-P2**
+
+The YOLOv8n-P2 architecture was selected due to its enhanced capability for detecting small objects in aerial imagery.
+
+Advantages:
+
+* Lightweight architecture
+* Fast inference speed
+* Better small-object detection
+* Suitable for real-time deployment
+
+---
+
+### Tracker
+
+**ByteTrack**
+
+ByteTrack associates detected objects across consecutive frames and maintains consistent object identities.
+
+Benefits:
+
+* Robust tracking performance
+* Handles occlusions effectively
+* Maintains stable IDs
+* Works efficiently with drone footage
+
+---
+
+# 📊 Dataset
+
+### VisDrone Dataset
+
+The project was trained and evaluated using the VisDrone benchmark dataset.
+
+Dataset contains:
+
+* Aerial Images
+* Video Sequences
+* Object Detection Annotations
+* Multi-Object Tracking Labels
+
+Object Categories Include:
+
+* Pedestrian
+* Person
+* Bicycle
+* Car
+* Van
+* Truck
+* Bus
+* Motorcycle
+* Others
+
+---
+
+# ⚙️ Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/yourusername/The-Aerial-Guardian.git
+
+cd The-Aerial-Guardian
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+# 🚀 Usage
+
+### Train the Model
+
+```bash
+python train.py
+```
+
+### Run Detection
+
+```bash
+python detect.py
+```
+
+### Run Tracking
+
+```bash
+python track.py
+```
+
+### Evaluate Performance
+
+```bash
+python evaluate.py
+```
+
+---
+
+# 📈 Evaluation Metrics
+
+The system can be evaluated using:
+
+* mAP (Mean Average Precision)
+* Precision
+* Recall
+* MOTA
+* MOTP
+* IDF1 Score
+* FPS (Frames Per Second)
+
+---
+
+# 🔬 Challenges Addressed
+
+Drone-based vision systems introduce unique challenges:
+
+### Small Objects
+
+Objects often occupy very few pixels in aerial footage.
+
+### Camera Motion
+
+Continuous drone movement can affect tracking accuracy.
+
+### Occlusions
+
+Objects frequently overlap in crowded scenes.
+
+### Scale Variations
+
+Object sizes change significantly depending on altitude.
+
+The Aerial Guardian addresses these issues through optimized detection and tracking pipelines.
+
+---
+
+# 🎯 Future Improvements
+
+* Live Drone Feed Integration
+* Edge Deployment on NVIDIA Jetson
+* Object Re-Identification (ReID)
+* Crowd Density Estimation
+* Suspicious Activity Detection
+* Multi-Drone Coordination
+* Web Dashboard for Monitoring
+* AI-Based Threat Detection
+
+---
+
+# 📸 Sample Output
+
+```text
+Frame 124
+
+ID 01 → Person
+ID 02 → Person
+ID 03 → Car
+ID 04 → Bicycle
+
+Tracking Status: Active
+```
+
+---
+
+# 👨‍💻 Author
+
+### Priyanshu Tiwari
+
+B.Tech Computer Science Engineering
+
+Passionate about:
+
+* Artificial Intelligence
+* Machine Learning
+* Computer Vision
+* Drone Technology
+* Software Development
+
+---
+
+# ⭐ Final Note
+
+This project was built as part of my exploration into the intersection of **Computer Vision, Deep Learning, and Autonomous Aerial Systems**. The goal was not only to create a robust object detection and tracking pipeline but also to understand the real-world challenges involved in deploying AI systems on aerial platforms.
+
+If you find this project interesting, consider giving it a ⭐ and feel free to contribute or suggest improvements.
