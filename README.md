@@ -100,10 +100,10 @@ own browser via [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/)
 A workflow at [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)
 publishes [`web/`](web/) to GitHub Pages on every push to `main`. One-time setup:
 
-1. Push this repo to GitHub (already has a remote: `Halok600/JOB_PROJECT_II_DRONE`).
+1. Push this repo to GitHub (already has a remote: `Halok600/The-Aerial-Guardian`).
 2. Repo **Settings → Pages → Source → GitHub Actions**.
 3. Push to `main` (or run the workflow manually) — the site deploys to
-   `https://halok600.github.io/JOB_PROJECT_II_DRONE/`.
+   `https://halok600.github.io/The-Aerial-Guardian/`.
 
 ### Alternative free static hosts (same `web/` folder, zero config)
 
