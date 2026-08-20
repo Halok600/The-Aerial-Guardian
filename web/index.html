@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Aerial Guardian — Real-Time Drone Person Tracking</title>
+<meta name="description" content="YOLOv8n-P2 + ByteTrack multi-object tracking for aerial drone footage. Runs entirely in your browser — no server, no upload, no cost.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛸</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="boot-overlay" id="bootOverlay">
+  <div class="boot-ring"></div>
+  <div class="boot-text" id="bootText">Loading detector weights…</div>
+</div>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#top" class="brand"><span class="brand-mark">AG</span> The Aerial Guardian</a>
+    <div class="nav-links">
+      <a href="#live-demo">Live Demo</a>
+      <a href="#how-it-works">How It Works</a>
+      <a href="#architecture">Architecture</a>
+    </div>
+    <div class="nav-right">
+      <a class="icon-btn" href="https://github.com/Halok600/JOB_PROJECT_II_DRONE" target="_blank" rel="noopener" title="View source on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.73.5.98 5.24.98 11.52c0 5.02 3.26 9.28 7.78 10.78.57.1.78-.25.78-.55v-2.1c-3.17.69-3.84-1.36-3.84-1.36-.52-1.32-1.27-1.68-1.27-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.24 3.33.95.1-.74.4-1.24.72-1.53-2.53-.29-5.19-1.27-5.19-5.63 0-1.24.44-2.26 1.17-3.06-.12-.29-.51-1.45.11-3.02 0 0 .96-.31 3.14 1.17a10.9 10.9 0 0 1 5.72 0c2.18-1.48 3.14-1.17 3.14-1.17.62 1.57.23 2.73.11 3.02.73.8 1.17 1.82 1.17 3.06 0 4.37-2.67 5.33-5.21 5.62.41.36.77 1.06.77 2.14v3.17c0 .3.21.66.79.55A11.03 11.03 0 0 0 23.02 11.5C23.02 5.24 18.27.5 12 .5z"/></svg>
+      </a>
+      <button class="icon-btn theme-toggle" id="themeToggle" title="Toggle theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="hero-blob"></div>
+  <div class="container">
+    <div class="eyebrow">Live in your browser · zero servers</div>
+    <h1>Track every person<br><span>from the sky.</span></h1>
+    <p class="lead">A custom YOLOv8n-P2 detector tuned for 8–16px aerial targets, paired with a hand-built ByteTrack + Kalman filter tracker — trained on VisDrone footage and running fully client-side via ONNX Runtime Web.</p>
+    <div class="hero-ctas">
+      <a href="#live-demo" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        Try the Live Demo
+      </a>
+      <a href="https://github.com/Halok600/JOB_PROJECT_II_DRONE" target="_blank" rel="noopener" class="btn btn-ghost">View Source</a>
+    </div>
+    <div class="hero-stats reveal">
+      <div class="hero-stat"><div class="val">2.9M</div><div class="lbl">Parameters</div></div>
+      <div class="hero-stat"><div class="val">4</div><div class="lbl">Detection Scales</div></div>
+      <div class="hero-stat"><div class="val">12.2</div><div class="lbl">GFLOPs</div></div>
+      <div class="hero-stat"><div class="val">100%</div><div class="lbl">Client-Side</div></div>
+    </div>
+  </div>
+</header>
+
+<section class="tight">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="eyebrow">Server-side reference runs</div>
+      <h2>Trained on a laptop RTX 3050</h2>
+      <p>These clips were produced by the full Python pipeline — YOLOv8n-P2 + OpenCV ECC camera-motion compensation + ByteTrack — running locally with CUDA. The browser demo below runs the same detector and tracker logic, minus ECC.</p>
+    </div>
+    <div class="showcase-grid reveal">
+      <div class="panel showcase-card">
+        <video src="assets/demo/demo1.mp4" autoplay muted loop playsinline></video>
+        <div class="cap"><span>VisDrone sequence · uav0000305</span><span class="badge">Python pipeline</span></div>
+      </div>
+      <div class="panel showcase-card">
+        <video src="assets/demo/demo2.mp4" autoplay muted loop playsinline></video>
+        <div class="cap"><span>VisDrone sequence · uav0000339</span><span class="badge">Python pipeline</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="live-demo">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="eyebrow">Interactive</div>
+      <h2>Run it yourself — right now</h2>
+      <p>Upload a video or image, or go live with your webcam. Inference runs entirely on your device via ONNX Runtime Web (WebGPU, falling back to WASM). Nothing is ever uploaded anywhere.</p>
+    </div>
+
+    <div class="demo-layout reveal">
+      <div>
+        <div class="mode-tabs">
+          <div class="mode-tab active" data-mode="video">📹 Video</div>
+          <div class="mode-tab" data-mode="image">🖼️ Image</div>
+          <div class="mode-tab" data-mode="webcam">🎥 Webcam</div>
+        </div>
+
+        <div class="stage" id="stage">
+          <video id="sourceVideo" style="display:none" playsinline></video>
+          <img id="sourceImage" style="display:none" alt="uploaded frame">
+          <canvas id="overlay"></canvas>
+          <div class="stage-hud">
+            <span class="hud-pill" id="hudFps">0.0 FPS</span>
+            <span class="hud-pill rec" id="recPill" style="display:none">LIVE</span>
+            <span class="hud-pill" id="hudTracks">0 tracked</span>
+          </div>
+          <div class="stage-empty" id="stageEmpty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 7v10l8 4 8-4V7"/><path d="M12 11v10"/></svg>
+            <div>Drop a video file here, or click to browse.</div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:14px; align-items:center; flex-wrap:wrap;">
+          <div class="dropzone" id="dropzone">Choose file / drag &amp; drop</div>
+          <button class="btn btn-primary btn-sm" id="webcamBtn" style="display:none">Start Webcam</button>
+          <button class="btn btn-ghost btn-sm" id="resetBtn">Reset Tracker IDs</button>
+          <input type="file" id="fileInput" accept="video/*,image/*" style="display:none">
+          <span class="status-line" id="statusLine" style="margin-left:auto">Loading model…</span>
+        </div>
+      </div>
+
+      <div class="side-panel">
+        <div class="panel">
+          <div class="panel-title">Live Stats</div>
+          <div class="stat-row"><span>FPS</span><span class="v accent" id="fpsVal">0.0</span></div>
+          <div class="stat-row"><span>Backend</span><span class="v" id="backendVal">—</span></div>
+          <div class="stat-row"><span>Raw detections</span><span class="v" id="detVal">0</span></div>
+          <div class="stat-row"><span>Active tracks</span><span class="v" id="trackVal">0</span></div>
+          <div class="stat-row"><span>Total IDs assigned</span><span class="v" id="idVal">0</span></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Settings</div>
+          <div class="field">
+            <label>Confidence threshold <span class="fv" id="confVal">0.08</span></label>
+            <input type="range" id="confSlider" min="0.02" max="0.8" step="0.01" value="0.08">
+          </div>
+          <div class="field">
+            <label>Trail length <span class="fv" id="trailVal">30</span></label>
+            <input type="range" id="trailSlider" min="0" max="60" step="5" value="30">
+          </div>
+        </div>
+
+        <div class="privacy-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 9 8 11 4.6-2 8-6 8-11V5l-8-3z"/></svg>
+          <span>All inference runs locally in your browser via WebAssembly/WebGPU. Your video and webcam feed never leave your device.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how-it-works">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="eyebrow">Pipeline</div>
+      <h2>Four stages, one forward pass</h2>
+      <p>No SAHI slicing, no multi-pass tiling — a single high-resolution forward pass through a 4-scale detection head handles targets as small as 8px.</p>
+    </div>
+    <div class="pipeline reveal">
+      <div class="panel pipe-card">
+        <div class="pipe-num">01</div>
+        <h4>Detect — YOLOv8n-P2</h4>
+        <p>A stride-4 detection head is grafted onto YOLOv8n's backbone, on top of the standard P3/P4/P5 heads — giving a 320×180 grid at imgsz 1280 for catching 8–16px pedestrians that standard YOLOv8 misses.</p>
+        <span class="tag">2.9M params</span>
+      </div>
+      <div class="panel pipe-card">
+        <div class="pipe-num">02</div>
+        <h4>Stabilise — ECC CMC</h4>
+        <p>OpenCV's ECC algorithm estimates inter-frame drone ego-motion on a downscaled 320×180 grayscale frame, producing an affine warp used to correct Kalman-predicted positions.</p>
+        <span class="tag">Python only</span>
+      </div>
+      <div class="panel pipe-card">
+        <div class="pipe-num">03</div>
+        <h4>Track — ByteTrack</h4>
+        <p>A 3-stage Hungarian association (high-conf → low-conf → lost-track re-activation) over IoU cost, backed by an 8D constant-velocity Kalman filter per track.</p>
+        <span class="tag">Runs in-browser</span>
+      </div>
+      <div class="panel pipe-card">
+        <div class="pipe-num">04</div>
+        <h4>Render — Trails &amp; HUD</h4>
+        <p>Golden-angle hue spacing gives every track ID a visually distinct, stable color; a single blended overlay draws fading trajectory tails without per-segment cost blow-up.</p>
+        <span class="tag">Canvas 2D</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="eyebrow">Under the hood</div>
+      <h2>Model card &amp; honest limitations</h2>
+    </div>
+    <div class="spec-grid reveal">
+      <div class="panel spec-table">
+        <div class="spec-row"><span>Architecture</span><span>YOLOv8n + P2 head</span></div>
+        <div class="spec-row"><span>Parameters</span><span>2,921,172</span></div>
+        <div class="spec-row"><span>GFLOPs</span><span>12.2</span></div>
+        <div class="spec-row"><span>Classes</span><span>1 (person)</span></div>
+        <div class="spec-row"><span>Training input size</span><span>1280×1280</span></div>
+        <div class="spec-row"><span>Browser inference size</span><span>960×960 (letterboxed)</span></div>
+        <div class="spec-row"><span>Dataset</span><span>VisDrone MOT (7 sequences)</span></div>
+        <div class="spec-row"><span>Train / val frames</span><span>1,978 / 275</span></div>
+        <div class="spec-row"><span>Tracker</span><span>Custom ByteTrack + Kalman</span></div>
+        <div class="spec-row"><span>Export format</span><span>ONNX (opset 12)</span></div>
+      </div>
+      <div class="note-card panel">
+        <h4>⚠ Model quality is a work in progress</h4>
+        <p>This detector is trained on a genuinely small dataset (under 2,000 frames from 6 VisDrone sequences) for aerial targets as small as 8–16px — one of the hardest regimes in object detection. Expect missed detections, especially at low confidence.</p>
+        <ul>
+          <li>Training is actively continuing on the original RTX 3050 — later checkpoints will be re-exported here.</li>
+          <li>Lower the confidence slider if nothing is detected; raise it if you see false positives.</li>
+          <li>The biggest lever for improvement is more training data — the full VisDrone-MOT training split (56 sequences) instead of just its validation split.</li>
+          <li>Camera-motion compensation (ECC) is not ported to the browser; expect more ID switches on fast-panning footage than the Python demo clips above.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Built with YOLOv8, ONNX Runtime Web, and a from-scratch ByteTrack implementation. <a href="https://github.com/Halok600/JOB_PROJECT_II_DRONE" target="_blank" rel="noopener">Source on GitHub</a> — 100% free, static, client-side hosting.</p>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.webgpu.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
