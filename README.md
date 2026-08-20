@@ -1,6 +1,8 @@
 # The Aerial Guardian 🛸
 ### Multi-Object Tracking Pipeline for Drone Footage
 
+### 🔴 [Live Demo → halok600.github.io/The-Aerial-Guardian](https://halok600.github.io/The-Aerial-Guardian/)
+
 A person-tracking pipeline for aerial drone video: a custom **YOLOv8n-P2** detector
 (an extra stride-4 detection head grafted onto YOLOv8n, tuned for 8–16px targets)
 feeding a from-scratch **ByteTrack** implementation (Kalman filter + 3-stage
@@ -8,8 +10,9 @@ Hungarian IoU association) with OpenCV **ECC** camera-motion compensation for a
 panning drone camera. Trained on VisDrone MOT footage on a laptop RTX 3050.
 
 **Live browser demo (free, no server, no signup):** run the same detector +
-tracker entirely client-side via ONNX Runtime Web. See [`web/`](web/) and the
-Deployment section below.
+tracker entirely client-side via ONNX Runtime Web, live at
+**[halok600.github.io/The-Aerial-Guardian](https://halok600.github.io/The-Aerial-Guardian/)**.
+See [`web/`](web/) and the Deployment section below.
 
 ---
 
@@ -102,8 +105,9 @@ publishes [`web/`](web/) to GitHub Pages on every push to `main`. One-time setup
 
 1. Push this repo to GitHub (already has a remote: `Halok600/The-Aerial-Guardian`).
 2. Repo **Settings → Pages → Source → GitHub Actions**.
-3. Push to `main` (or run the workflow manually) — the site deploys to
-   `https://halok600.github.io/The-Aerial-Guardian/`.
+3. Push to `main` (or run the workflow manually) — the site deploys automatically.
+
+**It's already live:** [https://halok600.github.io/The-Aerial-Guardian/](https://halok600.github.io/The-Aerial-Guardian/)
 
 ### Alternative free static hosts (same `web/` folder, zero config)
 
