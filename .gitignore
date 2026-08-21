@@ -25,7 +25,6 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
-.claude/
 *.swp
 
 # Training log (background runs)
