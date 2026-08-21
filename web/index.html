@@ -200,6 +200,7 @@
         <div class="spec-row"><span>Browser inference size</span><span>960×960 (letterboxed)</span></div>
         <div class="spec-row"><span>Dataset</span><span>VisDrone MOT (7 sequences)</span></div>
         <div class="spec-row"><span>Train / val frames</span><span>1,978 / 275</span></div>
+        <div class="spec-row"><span>mAP50 / Recall</span><span>0.196 / 14.5%</span></div>
         <div class="spec-row"><span>Tracker</span><span>Custom ByteTrack + Kalman</span></div>
         <div class="spec-row"><span>Export format</span><span>ONNX (opset 12)</span></div>
       </div>
@@ -209,12 +210,12 @@
           <p>Live demo: <a href="https://halok600.github.io/The-Aerial-Guardian/" target="_blank" rel="noopener">halok600.github.io/The-Aerial-Guardian</a><br>Source: <a href="https://github.com/Halok600/The-Aerial-Guardian" target="_blank" rel="noopener">github.com/Halok600/The-Aerial-Guardian</a></p>
         </div>
         <div class="note-card panel">
-          <h4>⚠ Model quality is a work in progress</h4>
+          <h4>⚠ Model quality — honest limits</h4>
           <p>This detector is trained on a genuinely small dataset (under 2,000 frames from 6 VisDrone sequences) for aerial targets as small as 8–16px — one of the hardest regimes in object detection. Expect missed detections, especially at low confidence.</p>
           <ul>
-            <li>Training is actively continuing on the original RTX 3050 — later checkpoints will be re-exported here.</li>
+            <li>mAP50 = 0.196 (best checkpoint, epoch 27) — training ran 100+ epochs total but loss plateaued in validation mAP past that point, a sign this dataset's signal is close to exhausted rather than an optimization issue.</li>
             <li>Lower the confidence slider if nothing is detected; raise it if you see false positives.</li>
-            <li>The biggest lever for improvement is more training data — the full VisDrone-MOT training split (56 sequences) instead of just its validation split.</li>
+            <li>The biggest remaining lever is more training data — the full VisDrone-MOT training split (56 sequences) instead of just its validation split.</li>
             <li>Camera-motion compensation (ECC) is not ported to the browser; expect more ID switches on fast-panning footage than the Python demo clips above.</li>
           </ul>
         </div>

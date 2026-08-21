@@ -30,6 +30,7 @@ __pycache__/
 
 # Training log (background runs)
 train_resume.log
+train_v*.log
 
 # OS
 .DS_Store

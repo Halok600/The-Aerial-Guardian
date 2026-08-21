@@ -56,23 +56,24 @@ Outputs land in `outputs/videos/<name>_tracked.mp4`.
 
 ## Model status — honest assessment
 
-The current checkpoint is genuinely undertrained: **mAP50 ≈ 0.17, recall ≈ 15%**
-after ~59 epochs on a small dataset (1,978 train / 275 val frames drawn from 6
-VisDrone sequences — the *validation* split of VisDrone-MOT, not its much larger
-56-sequence training split). Detecting 8–16px pedestrians from altitude is one of
-the hardest regimes in object detection, and this dataset is small for training a
-randomly-initialized detection head from scratch.
+Current best checkpoint: **mAP50 = 0.196, recall = 14.5%, precision = 62.7%**
+(epoch 27 of `runs/train/aerial_guardian_p2_v2/`, deployed to the live demo).
+That's up from the original mAP50 ≈ 0.17 / recall ≈ 15% checkpoint, reached
+after a combined 100+ epochs across several training/resume sessions on a
+small dataset (1,978 train / 275 val frames drawn from 6 VisDrone sequences —
+the *validation* split of VisDrone-MOT, not its much larger 56-sequence
+training split).
 
-Training is being continued (see `runs/train/aerial_guardian_p2_v1/`, resumable
-via `python scripts/02_train.py --resume`). The two highest-leverage further
-improvements, in order:
+Notably, **no epoch after 27 beat that mAP50**, despite training loss
+continuing to decline smoothly all the way to epoch 100 — a classic signature
+of a small dataset running out of new signal to give the model, rather than
+an optimization problem. More epochs on this same data are unlikely to help
+much further. The one remaining highest-leverage lever:
 
-1. **More data** — swap in the full VisDrone2019-MOT-train split (56 sequences)
-   instead of just the val split's 6/1 sequences. This is almost certainly the
-   single biggest lever; VisDrone is a well-known public dataset (free to
-   download from the [official VisDrone GitHub](https://github.com/VisDrone/VisDrone-Dataset)).
-2. **More epochs** — loss was still decreasing with no plateau at epoch 59;
-   100+ epochs with `close_mosaic` tapering is standard for small custom heads.
+- **More data** — swap in the full VisDrone2019-MOT-train split (56 sequences)
+  instead of just the val split's 6/1 sequences. VisDrone is a well-known
+  public dataset (free to download from the
+  [official VisDrone GitHub](https://github.com/VisDrone/VisDrone-Dataset)).
 
 Re-export ONNX for the web demo after any retrain:
 
