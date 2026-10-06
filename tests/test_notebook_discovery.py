@@ -141,3 +141,21 @@ def test_params_lines_still_strict_key_value():
     params = src.split("# %% PARAMS\n")[1].split("\n# %%")[0].strip().splitlines()
     assert [ln.split(" = ")[0] for ln in params] == [
         "SCALE", "SMOKE", "TIME_HOURS", "MOT_TRAIN_DIR", "RESUME_FROM", "USE_BOTH_GPUS"]
+
+
+def test_batch_sizes_pinned_for_t4():
+    import re
+    src = NOTEBOOK.read_text(encoding="utf-8")
+    m = re.search(r"^BATCH = (\d+) if SCALE == \"s\" else (\d+)", src, flags=re.M)
+    assert m, "BATCH line not found"
+    assert (int(m.group(1)), int(m.group(2))) == (4, 16)   # s: batch 8 at 1280 OOMs on a 16 GB T4
+
+
+def test_allocator_env_set_before_torch_or_ultralytics_is_imported():
+    src = NOTEBOOK.read_text(encoding="utf-8")
+    env = src.index('os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")')
+    assert src.index("import os") < env
+    for needle in ("import torch", "import ultralytics", "from ultralytics"):
+        assert env < src.index(needle), needle
+    first_code_cell_end = src.index("\n# %%", src.index("# %%\n"))   # end of the cell holding the imports
+    assert env < first_code_cell_end

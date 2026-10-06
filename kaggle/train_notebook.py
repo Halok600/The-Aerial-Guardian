@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # reduce fragmentation OOMs at 1280px; must precede any torch import
 T0 = time.time()  # session clock for the time budget; keep before pip install
 SESSION_LIMIT_H = 11.0  # Kaggle kills sessions at 12 h; keep 1 h headroom
 RESERVE_H = 1.0  # post-training: final val, checkpoint save, plots, notebook val + copy
@@ -107,7 +108,7 @@ WORK = Path("/kaggle/working")
 TMP = Path("/tmp/ag")
 CODE = WORK / "code"
 IMGSZ = 1280 if SCALE == "s" else 960
-BATCH = 8 if SCALE == "s" else 16
+BATCH = 4 if SCALE == "s" else 16  # T4 16GB: batch 8 at 1280 OOMs (P2 head + dense scenes); nbs=64 keeps the effective batch via accumulation
 RUN_NAME = f"yolo26{SCALE}-p2"
 
 CODE_SRC = find_input_dir("notebook_helpers.py", INPUT_ROOT, fallback_name="aerial-guardian-code")
