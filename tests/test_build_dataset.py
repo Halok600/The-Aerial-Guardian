@@ -39,6 +39,18 @@ def test_det_val_copies_image_unmodified(tmp_path):
     assert filecmp.cmp(det / "images" / "a.jpg", out / "images" / "val" / "a.jpg", shallow=False)
 
 
+def test_masked_rebuild_does_not_corrupt_source_via_hardlink(tmp_path):
+    det = _make_det(tmp_path)
+    src = det / "images" / "a.jpg"
+    original = src.read_bytes()
+    out = tmp_path / "ds"
+    bd.build_det_split(det, out, "train", DEFAULT_CLASS_MAP, mask=False)   # hardlinks the source
+    bd.build_det_split(det, out, "train", DEFAULT_CLASS_MAP, mask=True)    # must not write through the link
+    assert src.read_bytes() == original
+    img = cv2.imread(str(out / "images" / "train" / "a.jpg"))
+    assert abs(img[10:120, 690:950].mean() - 114) < 4
+
+
 def test_mot_subsamples_with_stride(tmp_path):
     mot = tmp_path / "VisDrone2019-MOT-train"
     seq = mot / "sequences" / "uav_test"

@@ -37,9 +37,15 @@ from src.data.visdrone import (  # noqa: E402
 from src.utils.classes import VISDRONE_NAMES  # noqa: E402
 
 
-def _link_or_copy(src: Path, dst: Path) -> None:
-    if dst.exists():
+def _clear_dst(dst: Path) -> None:
+    """Remove an existing output file. It may be a hardlink to a raw source image
+    from an earlier unmasked run; writing through it would corrupt the original."""
+    if dst.exists() or dst.is_symlink():
         dst.unlink()
+
+
+def _link_or_copy(src: Path, dst: Path) -> None:
+    _clear_dst(dst)
     try:
         os.link(src, dst)          # hardlink: instant, no extra disk
     except OSError:
@@ -53,6 +59,7 @@ def _write_sample(src_img: Path, dst_img: Path, dst_lbl: Path, boxes: list[Box],
     dst_lbl.parent.mkdir(parents=True, exist_ok=True)
     if mask and any(b.is_ignore for b in boxes):
         image = cv2.imread(str(src_img))
+        _clear_dst(dst_img)
         cv2.imwrite(str(dst_img), mask_ignored(image, boxes), [cv2.IMWRITE_JPEG_QUALITY, 95])
     else:
         _link_or_copy(src_img, dst_img)
