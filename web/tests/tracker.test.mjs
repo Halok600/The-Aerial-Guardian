@@ -5,7 +5,7 @@ import { ByteTracker, DEFAULT_CONFIG, pyRound } from '../js/tracker.js';
 
 const golden = JSON.parse(readFileSync(new URL('../../tests/fixtures/tracker_golden.json', import.meta.url)));
 
-test('DEFAULT_CONFIG mirrors configs/tracker.yaml', () => {
+test('DEFAULT_CONFIG equals the config recorded in the golden fixture', () => {
   assert.deepEqual(DEFAULT_CONFIG, golden.config);
 });
 
@@ -20,7 +20,7 @@ test('JS tracker reproduces Python IDs, classes and boxes frame by frame', () =>
       const want = frame.tracks[j];
       assert.equal(row[0], want[0], `frame ${i + 1}: id`);
       assert.equal(row[5], want[5], `frame ${i + 1}: cls`);
-      for (let k = 1; k <= 4; k++) assert.ok(Math.abs(row[k] - want[k]) < 1e-3, `frame ${i + 1}: box`);
+      for (let k = 1; k <= 4; k++) assert.ok(Math.abs(row[k] - want[k]) < 1e-6, `frame ${i + 1}: box`);
     });
   });
   assert.deepEqual(tracker.uniqueCounts(), golden.unique_counts);
