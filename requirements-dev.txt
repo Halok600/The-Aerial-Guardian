@@ -4,3 +4,4 @@ jupytext>=1.16
 kaggle>=1.6
 imageio-ffmpeg>=0.5
 trackeval @ git+https://github.com/JonathonLuiten/TrackEval.git
+lap>=0.5.12  # linear assignment used by Ultralytics' ByteTrack (the 05_eval_mot.py baseline)
