@@ -15,8 +15,10 @@ Usage
 from __future__ import annotations
 
 import argparse
+import contextlib
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -31,38 +33,61 @@ from src.utils.video_io import AsyncWriter, FramePrefetcher  # noqa: E402
 from src.utils.visualizer import TrackVisualizer  # noqa: E402
 
 
+@contextlib.contextmanager
+def _sigint_flag():
+    """Turn Ctrl+C into a polite stop flag; restores the previous handler on exit.
+
+    signal.signal only works on the main thread, so this is a no-op elsewhere
+    (e.g. when run() is called in-process from a worker thread).
+    """
+    flag = {"flag": False}
+    if threading.current_thread() is not threading.main_thread():
+        yield flag
+        return
+
+    def handler(*_):
+        flag["flag"] = True
+        print("\n[INFO] Ctrl+C — finishing up...")
+
+    previous = signal.signal(signal.SIGINT, handler)
+    try:
+        yield flag
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
 def run(args: argparse.Namespace) -> Path:
     source = Path(args.source)
-    src = FramePrefetcher(source, buffer_size=8)
     out_path = Path(args.out) if args.out else PROJECT_ROOT / "outputs" / "videos" / f"{source.stem}_tracked.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Build everything that can fail on bad input before the reader thread starts.
     detector = Detector(args.weights, DetectorSettings(imgsz=args.imgsz, conf=args.det_conf))
-    tracker = ByteTracker(TrackerConfig.from_yaml(args.tracker_config), frame_rate=src.fps_native)
+    tracker_cfg = TrackerConfig.from_yaml(args.tracker_config)
     cmc = None if args.no_cmc else ECCCompensator()
     renderer = TrackVisualizer(trail_len=args.trail_len)
-    writer = AsyncWriter(out_path, src.fps_native, (src.width, src.height))
 
-    stop = {"flag": False}
-    signal.signal(signal.SIGINT, lambda *_: stop.update(flag=True))
+    with FramePrefetcher(source, buffer_size=8) as src, _sigint_flag() as stop:
+        tracker = ByteTracker(tracker_cfg, frame_rate=src.fps_native)
+        writer = AsyncWriter(out_path, src.fps_native, (src.width, src.height))
 
-    times: list[float] = []
-    t0 = time.perf_counter()
-    try:
-        for frame_id, frame, tracks, dets in run_tracking(src, detector, tracker, cmc):
-            if stop["flag"] or (args.max_frames and frame_id > args.max_frames):
-                break
-            t1 = time.perf_counter()
-            times.append(t1 - t0)
-            t0 = t1
-            window = times[-30:]
-            fps = len(window) / sum(window) if sum(window) > 0 else 0.0
-            writer.write(renderer.draw(frame, tracks, tracker.unique_counts(), fps, frame_id))
-            if frame_id == 1 or frame_id % 30 == 0:
-                print(f"  frame {frame_id:5d}/{src.total_frames} | fps {fps:5.1f} | "
-                      f"dets {len(dets):4d} | active {len(tracks):3d} | ids {tracker.total_ids}")
-    finally:
-        writer.release()
+        times: list[float] = []
+        t0 = time.perf_counter()
+        try:
+            for frame_id, frame, tracks, dets in run_tracking(src, detector, tracker, cmc):
+                if stop["flag"] or (args.max_frames and frame_id > args.max_frames):
+                    break
+                t1 = time.perf_counter()
+                times.append(t1 - t0)
+                t0 = t1
+                window = times[-30:]
+                fps = len(window) / sum(window) if sum(window) > 0 else 0.0
+                writer.write(renderer.draw(frame, tracks, tracker.unique_counts(), fps, frame_id))
+                if frame_id == 1 or frame_id % 30 == 0:
+                    print(f"  frame {frame_id:5d}/{src.total_frames} | fps {fps:5.1f} | "
+                          f"dets {len(dets):4d} | active {len(tracks):3d} | ids {tracker.total_ids}")
+        finally:
+            writer.release()
 
     counts = tracker.unique_counts()
     print("\nUnique objects: " + ", ".join(f"{GROUP_LABELS[g]} {counts[g]}" for g in GROUP_ORDER))
