@@ -14,6 +14,9 @@ Usage
       --det data/visdrone/VisDrone2019-DET-train --mot data/visdrone/VisDrone2019-MOT-train
   python scripts/01_build_dataset.py --split val --out datasets/visdrone10 \\
       --det data/visdrone/VisDrone2019-DET-val --yaml configs/data/visdrone10.yaml
+
+--limit N keeps only the first N samples of each source dir (sorted order; for MOT after the
+stride sampling, so it spans only the first sequences) — used by the Kaggle smoke run.
 """
 from __future__ import annotations
 
@@ -68,9 +71,12 @@ def _write_sample(src_img: Path, dst_img: Path, dst_lbl: Path, boxes: list[Box],
 
 
 def build_det_split(det_dir: Path, out_dir: Path, split: str,
-                    class_map: dict[int, int], mask: bool) -> dict[str, int]:
+                    class_map: dict[int, int], mask: bool, limit: int | None = None) -> dict[str, int]:
+    """`limit` (None/0 = unlimited) caps the samples written: the first N in sorted order."""
     stats = {"images": 0, "boxes": 0}
     for ann in tqdm(sorted((det_dir / "annotations").glob("*.txt")), desc=f"DET {det_dir.name}"):
+        if limit and stats["images"] >= limit:
+            break
         src = det_dir / "images" / f"{ann.stem}.jpg"
         if not src.exists():
             continue
@@ -84,9 +90,13 @@ def build_det_split(det_dir: Path, out_dir: Path, split: str,
 
 
 def build_mot_split(mot_dir: Path, out_dir: Path, split: str, stride: int,
-                    class_map: dict[int, int], mask: bool) -> dict[str, int]:
+                    class_map: dict[int, int], mask: bool, limit: int | None = None) -> dict[str, int]:
+    """`limit` (None/0 = unlimited) caps the samples written AFTER stride sampling, in sorted
+    sequence/frame order, so a limited run only covers the first sequences (smoke tests)."""
     stats = {"images": 0, "boxes": 0}
     for ann in tqdm(sorted((mot_dir / "annotations").glob("*.txt")), desc=f"MOT {mot_dir.name}"):
+        if limit and stats["images"] >= limit:
+            break
         seq_dir = mot_dir / "sequences" / ann.stem
         first = next(iter(sorted(seq_dir.glob("*.jpg"))), None)
         if first is None:
@@ -94,6 +104,8 @@ def build_mot_split(mot_dir: Path, out_dir: Path, split: str, stride: int,
         with Image.open(first) as im:
             img_w, img_h = im.size          # all frames of a sequence share one size
         for frame_id, boxes in sorted(parse_mot_file(ann).items()):
+            if limit and stats["images"] >= limit:
+                break
             if (frame_id - 1) % stride:
                 continue
             src = seq_dir / f"{frame_id:07d}.jpg"
@@ -133,6 +145,9 @@ def main() -> None:
     p.add_argument("--no-mask", dest="mask", action="store_false")
     p.add_argument("--person-only", action="store_true",
                    help="Single 'person' class (pedestrian+people); used to score the old model.")
+    p.add_argument("--limit", type=int, default=0,
+                   help="Max samples written per source dir (first N in sorted order; MOT counted after "
+                        "stride sampling). 0 = no limit. For fast smoke builds.")
     p.add_argument("--yaml", type=Path, default=None, help="Write an Ultralytics dataset yaml here.")
     args = p.parse_args()
 
@@ -142,10 +157,10 @@ def main() -> None:
 
     total = {"images": 0, "boxes": 0}
     for d in args.det:
-        for k, v in build_det_split(d, args.out, args.split, class_map, mask).items():
+        for k, v in build_det_split(d, args.out, args.split, class_map, mask, args.limit).items():
             total[k] += v
     for d in args.mot:
-        for k, v in build_mot_split(d, args.out, args.split, args.mot_stride, class_map, mask).items():
+        for k, v in build_mot_split(d, args.out, args.split, args.mot_stride, class_map, mask, args.limit).items():
             total[k] += v
     print(f"[{args.split}] images={total['images']:,} boxes={total['boxes']:,} mask={mask} -> {args.out}")
     if args.yaml:

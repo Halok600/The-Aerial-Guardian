@@ -106,3 +106,24 @@ def test_unpack_code_zips_without_zips_is_noop(tmp_path):
     (code / "src").mkdir(parents=True)
     assert nh.unpack_code_zips(code) == []
     assert sorted(p.name for p in code.iterdir()) == ["src"]
+
+
+def test_list_top_levels_depth_three_and_truncation(tmp_path):
+    (tmp_path / "a" / "b" / "c" / "d").mkdir(parents=True)
+    for i in range(30):
+        (tmp_path / "many" / f"d{i:02d}").mkdir(parents=True)
+    out = nh.list_top_levels(tmp_path, depth=3, max_entries=5)
+    assert "a/b/c" in out and "a/b/c/d" not in out
+    assert any("more directories" in line for line in out)
+
+
+def test_resolve_mot_dir_error_lists_three_levels(tmp_path):
+    (tmp_path / "input" / "datasets" / "owner" / "slug").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="datasets/owner/slug"):
+        nh.resolve_mot_dir("/x/VisDrone2019-MOT-train", tmp_path / "input")
+
+
+def test_resolve_mot_dir_finds_dataset_under_datasets_owner_layout(tmp_path):
+    found = _mot(tmp_path / "input" / "datasets" / "akhileswarelluru" / "visdrone2019-mot"
+                 / "VisDrone_Zips" / "VisDrone2019-MOT-train" / "VisDrone2019-MOT-train")
+    assert nh.resolve_mot_dir("/kaggle/input/visdrone2019-mot/nope", tmp_path / "input") == str(found)

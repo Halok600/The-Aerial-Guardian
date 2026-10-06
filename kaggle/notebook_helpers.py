@@ -28,16 +28,23 @@ def find_mot_train_dir(input_root: Path) -> Path | None:
     return None
 
 
-def list_top_levels(input_root: Path, depth: int = 2) -> list[str]:
-    """Paths (relative to input_root) of the first `depth` directory levels, for error messages."""
+def list_top_levels(input_root: Path, depth: int = 3, max_entries: int = 25) -> list[str]:
+    """Directories (relative to input_root) down to `depth` levels, max `max_entries` per directory; for errors."""
     root = Path(input_root)
     if not root.is_dir():
         return [f"(missing: {root})"]
     out: list[str] = []
-    for a in sorted(p for p in root.iterdir() if p.is_dir()):
-        out.append(a.name)
-        if depth >= 2:
-            out += [f"{a.name}/{b.name}" for b in sorted(p for p in a.iterdir() if p.is_dir())]
+
+    def walk(d: Path, prefix: str, level: int) -> None:
+        subdirs = sorted(p for p in d.iterdir() if p.is_dir())
+        for sub in subdirs[:max_entries]:
+            out.append(f"{prefix}{sub.name}")
+            if level + 1 < depth:
+                walk(sub, f"{prefix}{sub.name}/", level + 1)
+        if len(subdirs) > max_entries:
+            out.append(f"{prefix}... ({len(subdirs) - max_entries} more directories)")
+
+    walk(root, "", 0)
     return out
 
 
@@ -59,7 +66,7 @@ def resolve_mot_dir(configured: str | None, input_root: str | Path = "/kaggle/in
         return str(found)
     raise FileNotFoundError(
         f"MOT_TRAIN_DIR {configured!r} is not a valid VisDrone2019-MOT-train directory (needs annotations/ and "
-        f"sequences/) and none was found under {input_root}. Contents of {input_root} (top two levels): "
+        f"sequences/) and none was found under {input_root}. Contents of {input_root} (top three levels): "
         f"{list_top_levels(Path(input_root))}. Rebuild the notebook with --mot-train-dir <path>, or --no-mot "
         f"to train on DET data only."
     )
