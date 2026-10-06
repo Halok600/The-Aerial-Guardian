@@ -125,3 +125,14 @@ def test_degenerate_boxes_are_dropped_before_tracking():
     assert [t.track_id for t in outs[-1]] == [1]
     assert tracker.total_ids == 1
     assert len(tracker.tracked) == 1
+
+
+def test_class_group_gating_blocks_cross_group_takeover():
+    # A car appears exactly where the vanished person would be predicted: without
+    # group gating the car would be matched to the person's track.
+    frames = ([[box(100 + 2 * i, 100, 30, 30, cls=0)] for i in range(5)]
+              + [[box(110 + 2 * i, 100, 30, 30, cls=3)] for i in range(5)])
+    tracker = ByteTracker()
+    outs = run(tracker, frames)
+    assert [(t.group, t.track_id) for t in outs[-1]] == [("vehicle", 2)]
+    assert tracker.total_ids == 2
