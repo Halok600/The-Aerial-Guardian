@@ -9,8 +9,20 @@
  * i.e. image content moved by +d from prev to curr. GlobalMotion.update turns
  * that into a prev -> curr affine [[1,0,tx],[0,1,ty]] in source pixels.
  */
-export function estimateShift(prev, curr, w, h, radius = 8) {
-  let best = Infinity, bx = 0, by = 0;
+/**
+ * Estimate the global integer translation between two grayscale frames.
+ *
+ * Confidence gate: the best of ~(2r+1)^2 candidates always beats the zero shift
+ * by a few percent on pure noise, flat or low-texture frames (and sensor noise
+ * on a static camera), whereas a genuine pan beats it by a lot. So the plain
+ * mean SAD of the best candidate (no tie-break term) must be below
+ * `gate * meanSAD(0,0)`, otherwise [0, 0] is returned: a static camera must
+ * report no motion rather than a confident random shift that would later be
+ * added to every track. Pass gate = Infinity to get the raw best candidate.
+ * Shifts larger than `radius` are not recovered.
+ */
+export function estimateShift(prev, curr, w, h, radius = 8, gate = 0.9) {
+  let best = Infinity, bestSad = Infinity, sad00 = Infinity, bx = 0, by = 0;
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
       let sad = 0, n = 0;
@@ -18,10 +30,13 @@ export function estimateShift(prev, curr, w, h, radius = 8) {
         const rowC = y * w, rowP = (y - dy) * w;
         for (let x = radius; x < w - radius; x += 2) { sad += Math.abs(curr[rowC + x] - prev[rowP + x - dx]); n++; }
       }
-      const score = sad / n + 1e-3 * (dx * dx + dy * dy);   // tie-break toward small motion
-      if (score < best) { best = score; bx = dx; by = dy; }
+      const mean = sad / n;
+      if (dx === 0 && dy === 0) sad00 = mean;
+      const score = mean + 1e-3 * (dx * dx + dy * dy);   // tie-break toward small motion
+      if (score < best) { best = score; bestSad = mean; bx = dx; by = dy; }
     }
   }
+  if (sad00 === 0 || !(bestSad < gate * sad00)) return [0, 0];
   return [bx, by];
 }
 

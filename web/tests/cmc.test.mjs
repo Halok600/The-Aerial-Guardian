@@ -11,6 +11,42 @@ function pattern(w, h, dx = 0, dy = 0) {
   return img;
 }
 
+
+// Deterministic PRNG so the noise tests are reproducible (never Math.random).
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function noiseImage(w, h, seed) {
+  const rnd = mulberry32(seed), img = new Uint8Array(w * h);
+  for (let i = 0; i < img.length; i++) img[i] = Math.floor(rnd() * 256);
+  return img;
+}
+
+// Soft Gaussian blobs on a mid-grey background, shifted by (dx, dy), plus optional
+// seeded noise of +-noise grey levels. `contrast` scales the blob amplitude.
+const BLOBS = [[30, 20, 8], [80, 45, 11], [120, 25, 7], [50, 70, 9], [135, 68, 10], [100, 80, 6], [15, 55, 7]];
+function blobImage(w, h, dx = 0, dy = 0, { noise = 0, seed = 1, contrast = 1 } = {}) {
+  const rnd = mulberry32(seed), img = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let v = 128;
+    BLOBS.forEach(([bx, by, r], i) => {
+      const d2 = (x - dx - bx) ** 2 + (y - dy - by) ** 2;
+      v += (i % 2 ? -1 : 1) * 90 * contrast * Math.exp(-d2 / (2 * r * r));
+    });
+    v += noise * (2 * rnd() - 1);
+    img[y * w + x] = Math.max(0, Math.min(255, Math.round(v)));
+  }
+  return img;
+}
+
 test('recovers an integer shift', () => {
   const w = 160, h = 90;
   assert.deepEqual(estimateShift(pattern(w, h), pattern(w, h, 3, -2), w, h), [3, -2]);
@@ -26,12 +62,51 @@ test('recovers a larger in-radius shift on a 160x90 texture', () => {
   assert.deepEqual(estimateShift(pattern(w, h), pattern(w, h, 6, -4), w, h), [6, -4]);
 });
 
-test('shift beyond the search radius is clamped, not a crash', () => {
-  const w = 160, h = 90, radius = 8;
-  const [dx, dy] = estimateShift(pattern(w, h), pattern(w, h, 12, 0), w, h, radius);
-  assert.ok(Number.isInteger(dx) && Number.isInteger(dy));
-  assert.ok(Math.hypot(dx, dy) <= radius * Math.SQRT2 + 1e-9);
-  assert.ok(Math.abs(dx) <= radius && Math.abs(dy) <= radius);
+test('a shift beyond the search radius saturates at the boundary (documented limitation)', () => {
+  // True shift 12 > radius 8: it is NOT recovered. The best candidate is the one
+  // at the search boundary, so the result saturates at 8 along that axis. Larger
+  // camera motion needs the Python pipeline's ECC compensator.
+  const w = 160, h = 90;
+  assert.deepEqual(estimateShift(pattern(w, h), pattern(w, h, 12, 0), w, h), [8, 0]);
+  assert.deepEqual(estimateShift(blobImage(w, h), blobImage(w, h, 12, 0), w, h), [8, 0]);
+});
+
+test('independent pure-noise pairs give no motion (confidence gate)', () => {
+  const w = 160, h = 90;
+  for (let seed = 1; seed <= 10; seed++) {
+    const r = estimateShift(noiseImage(w, h, seed), noiseImage(w, h, 1000 + seed), w, h);
+    assert.deepEqual(r, [0, 0], `seed ${seed}`);
+  }
+});
+
+test('a genuine shift is still recovered through mild noise', () => {
+  const w = 160, h = 90;
+  const a = blobImage(w, h, 0, 0, { noise: 6, seed: 11 });
+  const b = blobImage(w, h, 5, -3, { noise: 6, seed: 12 });
+  assert.deepEqual(estimateShift(a, b, w, h), [5, -3]);
+});
+
+test('flat image pair gives no motion', () => {
+  const w = 160, h = 90, a = new Uint8Array(w * h).fill(120), b = new Uint8Array(w * h).fill(120);
+  assert.deepEqual(estimateShift(a, b, w, h), [0, 0]);
+});
+
+test('static low-contrast scene with independent sensor noise does not drift', () => {
+  const w = 160, h = 90;
+  for (let seed = 1; seed <= 10; seed++) {
+    const a = blobImage(w, h, 0, 0, { noise: 8, seed, contrast: 0.08 });
+    const b = blobImage(w, h, 0, 0, { noise: 8, seed: 500 + seed, contrast: 0.08 });
+    assert.deepEqual(estimateShift(a, b, w, h), [0, 0], `seed ${seed}`);
+  }
+});
+
+test('the gate can be disabled and then returns the raw best candidate', () => {
+  const w = 160, h = 90;
+  const moved = [];
+  for (let seed = 1; seed <= 10; seed++) {
+    moved.push(estimateShift(noiseImage(w, h, seed), noiseImage(w, h, 1000 + seed), w, h, 8, Infinity));
+  }
+  assert.ok(moved.some(([dx, dy]) => dx !== 0 || dy !== 0), 'ungated noise should produce some spurious motion');
 });
 
 test('estimateShift on 160x90 averages well under 50 ms per call', () => {
