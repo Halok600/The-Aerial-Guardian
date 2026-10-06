@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=8.0
+jupytext>=1.16
+kaggle>=1.6
+imageio-ffmpeg>=0.5
+trackeval @ git+https://github.com/JonathonLuiten/TrackEval.git
