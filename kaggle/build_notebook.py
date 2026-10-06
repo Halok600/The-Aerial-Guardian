@@ -18,9 +18,11 @@ import jupytext
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "train_notebook.py"
+DEFAULT_TIME_HOURS = 9.5  # keep equal to TIME_HOURS in train_notebook.py (pinned by a test)
 
 
 def _literal(value) -> str:
+    """Python source literal: JSON quoting for str, repr for None/bool/numbers (never JSON null/true)."""
     return json.dumps(value) if isinstance(value, str) else repr(value)
 
 
@@ -42,6 +44,13 @@ def default_mot_train_dir(mot_dataset: str) -> str:
     """
     name = mot_dataset.split("/")[-1]
     return f"/kaggle/input/{name}/VisDrone_Zips/VisDrone2019-MOT-train/VisDrone2019-MOT-train"
+
+
+def mot_dir_param(mot_dataset: str, mot_train_dir: str | None, no_mot: bool) -> str | None:
+    """MOT_TRAIN_DIR value for the notebook; None only as an explicit --no-mot opt-out."""
+    if no_mot:
+        return None
+    return mot_train_dir or default_mot_train_dir(mot_dataset)
 
 
 def kernel_metadata(user: str, mot_dataset: str, scale: str) -> dict:
@@ -67,13 +76,18 @@ def main() -> None:
     p.add_argument("--mot-train-dir", default=None,
                    help="Path of VisDrone2019-MOT-train inside /kaggle/input "
                         "(default derived from the slug, assuming the akhileswarelluru/visdrone2019-mot layout)")
+    p.add_argument("--no-mot", action="store_true",
+                   help="explicit opt-out: train on DET data only (otherwise a missing MOT dir is an error)")
     p.add_argument("--scale", choices=["n", "s"], default="s")
     p.add_argument("--smoke", action="store_true")
-    p.add_argument("--time-hours", type=float, default=11.0)
+    p.add_argument("--time-hours", type=float, default=DEFAULT_TIME_HOURS,
+                   help="training-time cap; the notebook also subtracts setup time to stay under Kaggle's 12 h kill")
     p.add_argument("--resume-from", default=None)
     args = p.parse_args()
 
-    mot_dir = args.mot_train_dir or default_mot_train_dir(args.mot_dataset)
+    if args.no_mot and args.mot_train_dir:
+        p.error("--no-mot and --mot-train-dir are mutually exclusive")
+    mot_dir = mot_dir_param(args.mot_dataset, args.mot_train_dir, args.no_mot)
     src = render({"SCALE": args.scale, "SMOKE": args.smoke, "TIME_HOURS": args.time_hours,
                   "MOT_TRAIN_DIR": mot_dir, "RESUME_FROM": args.resume_from})
     jupytext.write(jupytext.reads(src, fmt="py:percent"), HERE / "02_train_kaggle.ipynb")

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """kaggle/push_code.py — upload the code the notebook needs as a PRIVATE Kaggle dataset.
 
-Keeps work-in-progress off GitHub: the notebook reads src/ and the dataset
-builder from /kaggle/input/aerial-guardian-code.
+Keeps work-in-progress off GitHub: the notebook reads src/, the dataset
+builder and notebook_helpers.py from /kaggle/input/aerial-guardian-code.
 
   python kaggle/push_code.py --user <kaggle-user> --new     # first time
   python kaggle/push_code.py --user <kaggle-user>           # later updates
@@ -29,6 +29,7 @@ def main() -> None:
     shutil.copytree(ROOT / "src", STAGE / "src", ignore=shutil.ignore_patterns("__pycache__"))
     (STAGE / "scripts").mkdir(parents=True)
     shutil.copy2(ROOT / "scripts" / "01_build_dataset.py", STAGE / "scripts")
+    shutil.copy2(ROOT / "kaggle" / "notebook_helpers.py", STAGE)  # dataset root; the notebook puts it on sys.path
     meta = {"title": "aerial-guardian-code", "id": f"{args.user}/aerial-guardian-code",
             "licenses": [{"name": "MIT"}]}
     (STAGE / "dataset-metadata.json").write_text(json.dumps(meta, indent=2))

@@ -10,7 +10,7 @@
 # %% PARAMS
 SCALE = "s"
 SMOKE = False
-TIME_HOURS = 11.0
+TIME_HOURS = 9.5
 MOT_TRAIN_DIR = "/kaggle/input/visdrone-mot/VisDrone_Zips/VisDrone2019-MOT-train/VisDrone2019-MOT-train"
 RESUME_FROM = None
 USE_BOTH_GPUS = False
@@ -20,8 +20,13 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
+
+T0 = time.time()  # session clock for the time budget; keep before pip install
+SESSION_LIMIT_H = 11.0  # Kaggle kills sessions at 12 h; keep 1 h headroom
+RESERVE_H = 1.0  # post-training: final val, checkpoint save, plots, notebook val + copy
 
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "ultralytics==8.4.174"], check=True)
 
@@ -37,6 +42,8 @@ for z in list(CODE.glob("*.zip")):
     zipfile.ZipFile(z).extractall(CODE)
     z.unlink()
 print(sorted(p.name for p in CODE.iterdir()))
+sys.path.insert(0, str(CODE))  # push_code.py stages notebook_helpers.py at the dataset root
+from notebook_helpers import compute_time_budget, resolve_mot_dir
 
 # %% Download VisDrone DET (Ultralytics asset mirror, same URLs as VisDrone.yaml)
 from ultralytics.utils import ASSETS_URL
@@ -52,10 +59,11 @@ YAML = WORK / "visdrone10.yaml"
 builder = str(CODE / "scripts" / "01_build_dataset.py")
 train_cmd = [sys.executable, builder, "--split", "train", "--out", str(DS),
              "--det", str(RAW / "VisDrone2019-DET-train")]
-if Path(MOT_TRAIN_DIR).exists():
-    train_cmd += ["--mot", MOT_TRAIN_DIR]
+MOT_DIR = resolve_mot_dir(MOT_TRAIN_DIR)  # searches /kaggle/input if missing, raises if not found
+if MOT_DIR:
+    train_cmd += ["--mot", MOT_DIR]
 else:
-    print(f"WARNING: {MOT_TRAIN_DIR} not found — training on DET-train only")
+    print("MOT_TRAIN_DIR is None (--no-mot): training on DET-train only")
 subprocess.run(train_cmd, check=True)
 subprocess.run([sys.executable, builder, "--split", "val", "--out", str(DS),
                 "--det", str(RAW / "VisDrone2019-DET-val"), "--yaml", str(YAML)], check=True)
@@ -84,9 +92,15 @@ device = [0, 1] if USE_BOTH_GPUS and torch.cuda.device_count() > 1 else 0
 if RESUME_FROM:
     model.train(resume=True)
 else:
+    budget_h = None
+    if not SMOKE:  # Ultralytics' `time` only bounds the training loop; subtract the setup already spent
+        used_h = (time.time() - T0) / 3600
+        budget_h = compute_time_budget(TIME_HOURS, used_h, SESSION_LIMIT_H, RESERVE_H)
+        print(f"training time budget: {budget_h:.2f} h (requested {TIME_HOURS} h, setup used {used_h:.2f} h, "
+              f"session limit {SESSION_LIMIT_H} h, reserve {RESERVE_H} h)")
     model.train(
         data=str(YAML), imgsz=640 if SMOKE else IMGSZ, batch=BATCH,
-        epochs=1 if SMOKE else 300, time=None if SMOKE else TIME_HOURS,
+        epochs=1 if SMOKE else 300, time=budget_h,
         fraction=0.01 if SMOKE else 1.0,
         pretrained=f"yolo26{SCALE}.pt",       # also covers the DDP code path
         device=device, workers=4, cos_lr=True, close_mosaic=10,
