@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import jupytext
+import nbformat
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "train_notebook.py"
@@ -51,6 +52,22 @@ def mot_dir_param(mot_dataset: str, mot_train_dir: str | None, no_mot: bool) -> 
     if no_mot:
         return None
     return mot_train_dir or default_mot_train_dir(mot_dataset)
+
+
+def write_notebook(src: str, path: Path) -> None:
+    """Convert percent-format source to an ipynb Kaggle's papermill runner accepts.
+
+    jupytext's default write drops all notebook metadata (notebook_metadata_filter '-all'),
+    leaving no kernelspec, and papermill then fails with "No kernel name found in notebook".
+    So set the kernelspec explicitly and write with nbformat directly.
+    """
+    nb = jupytext.reads(src, fmt="py:percent")
+    nb.metadata = nbformat.from_dict({
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python"},
+    })
+    nbformat.validate(nb)
+    nbformat.write(nb, path)
 
 
 def kernel_metadata(user: str, mot_dataset: str, scale: str) -> dict:
@@ -90,7 +107,7 @@ def main() -> None:
     mot_dir = mot_dir_param(args.mot_dataset, args.mot_train_dir, args.no_mot)
     src = render({"SCALE": args.scale, "SMOKE": args.smoke, "TIME_HOURS": args.time_hours,
                   "MOT_TRAIN_DIR": mot_dir, "RESUME_FROM": args.resume_from})
-    jupytext.write(jupytext.reads(src, fmt="py:percent"), HERE / "02_train_kaggle.ipynb")
+    write_notebook(src, HERE / "02_train_kaggle.ipynb")
     meta = kernel_metadata(args.user, args.mot_dataset, args.scale)
     (HERE / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print(f"wrote 02_train_kaggle.ipynb + kernel-metadata.json for {meta['id']}")

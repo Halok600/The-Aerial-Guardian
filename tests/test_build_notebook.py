@@ -94,3 +94,33 @@ def test_notebook_unpacks_code_zips_via_helper_not_into_code_root():
     nb_src = (ROOT / "kaggle" / "train_notebook.py").read_text(encoding="utf-8")
     assert "unpack_code_zips(CODE)" in nb_src
     assert "extractall(CODE)" not in nb_src
+
+
+def _check_notebook_file(path):
+    import json
+
+    import nbformat
+    nb = nbformat.read(path, as_version=4)
+    nbformat.validate(nb)
+    assert nb.metadata.kernelspec.name == "python3"      # papermill needs this to pick a kernel
+    assert nb.metadata.kernelspec.language == "python" and nb.metadata.language_info.name == "python"
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert raw["metadata"]["kernelspec"]["name"] == "python3"
+    assert raw["nbformat"] == 4 and "nbformat_minor" in raw
+    code = [c for c in raw["cells"] if c["cell_type"] == "code"]
+    assert code and all("metadata" in c and "outputs" in c and "execution_count" in c for c in code)
+    for c in code:
+        compile("".join(c["source"]), "cell", "exec")
+
+
+def test_written_notebook_has_kernelspec_and_validates(tmp_path):
+    out = tmp_path / "nb.ipynb"
+    bn.write_notebook(bn.render({"SCALE": "n", "MOT_TRAIN_DIR": None}), out)
+    _check_notebook_file(out)
+    assert "MOT_TRAIN_DIR = None" in "".join(
+        c["source"] if isinstance(c["source"], str) else "".join(c["source"])
+        for c in __import__("json").loads(out.read_text(encoding="utf-8"))["cells"])
+
+
+def test_committed_notebook_has_kernelspec_and_validates():
+    _check_notebook_file(ROOT / "kaggle" / "02_train_kaggle.ipynb")
