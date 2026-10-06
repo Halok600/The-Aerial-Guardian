@@ -18,6 +18,18 @@ from src.utils.classes import GROUP_COLORS_BGR, GROUP_LABELS, GROUP_ORDER, class
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
+def _scale_params(height: int, width: int) -> tuple[int, float, int, float, int]:
+    """Sizing for boxes, label chips and HUD from ONE scale factor.
+
+    s = max(1, min(h, w) / 720): never smaller than the 720p look (so 480p
+    clips stay legible), growing with resolution so the output survives
+    downscaling (README GIF). Using min(h, w) keeps the HUD inside portrait
+    frames. Returns (box_thickness, label_fs, label_thickness, hud_fs, hud_thickness).
+    """
+    s = max(1.0, min(height, width) / 720.0)
+    return (max(2, round(2 * s)), 0.6 * s, max(1, round(s)), 0.7 * s, max(1, round(s)))
+
+
 def id_to_bgr(track_id: int) -> tuple[int, int, int]:
     """Golden-angle hue per ID so neighbouring trails stay distinguishable."""
     hue = int((track_id * 137.508) % 180)
@@ -40,8 +52,7 @@ class TrackVisualizer:
 
     def draw(self, frame: np.ndarray, tracks, counts: dict, fps: float, frame_id: int) -> np.ndarray:
         out = frame.copy()
-        fs = max(0.45, out.shape[0] / 1500.0)
-        thickness = max(1, int(round(fs * 2)))
+        box_t, label_fs, label_t, hud_fs, hud_t = _scale_params(*out.shape[:2])
 
         if self.trail_len > 1:
             overlay = np.zeros_like(out)
@@ -60,14 +71,15 @@ class TrackVisualizer:
         for t in tracks:
             x1, y1, x2, y2 = (int(round(v)) for v in t.tlbr)
             color = GROUP_COLORS_BGR[t.group]
-            cv2.rectangle(out, (x1, y1), (x2, y2), color, thickness)
+            cv2.rectangle(out, (x1, y1), (x2, y2), color, box_t)    # non-AA: crisp, full-coverage edges
             label = label_for(t)
-            (lw, lh), base = cv2.getTextSize(label, FONT, fs * 0.8, 1)
+            (lw, lh), base = cv2.getTextSize(label, FONT, label_fs, label_t)
             ly = max(0, y1 - lh - base - 2)
             cv2.rectangle(out, (x1, ly), (x1 + lw + 4, ly + lh + base + 2), color, -1)
-            cv2.putText(out, label, (x1 + 2, ly + lh + 1), FONT, fs * 0.8, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.putText(out, label, (x1 + 2, ly + lh + 1), FONT, label_fs, (255, 255, 255), label_t,
+                        cv2.LINE_AA)
 
-        self._draw_hud(out, hud_lines(counts, fps, frame_id, len(tracks)), fs, thickness)
+        self._draw_hud(out, hud_lines(counts, fps, frame_id, len(tracks)), hud_fs, hud_t)
         return out
 
     @staticmethod
