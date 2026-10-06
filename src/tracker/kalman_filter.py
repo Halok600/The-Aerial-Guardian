@@ -1,78 +1,80 @@
-"""src/tracker/kalman_filter.py — Constant-velocity Kalman filter for ByteTrack."""
+"""src/tracker/kalman_filter.py — Constant-velocity Kalman filter in (cx, cy, aspect, h).
+
+v2 used fixed pixel noise (Q = 1px, R = 1px/10px), which is too loose for an
+8px pedestrian and far too tight for a 200px bus. Here every noise term scales
+with box height (ByteTrack / DeepSORT reference weights 1/20 and 1/160), so the
+filter behaves the same at every altitude and object size.
+
+State (8): [cx, cy, a, h, vcx, vcy, va, vh]   a = w / h
+Measurement (4): [cx, cy, a, h]
+"""
+from __future__ import annotations
+
 import numpy as np
+import scipy.linalg
 
 
-class KalmanBoxFilter:
-    """
-    Kalman filter tracking bounding boxes in [cx, cy, w, h] space.
+def tlbr_to_xyah(tlbr) -> np.ndarray:
+    x1, y1, x2, y2 = np.asarray(tlbr, dtype=float)[:4]
+    w, h = x2 - x1, y2 - y1
+    return np.array([x1 + w / 2.0, y1 + h / 2.0, w / max(h, 1e-6), h], dtype=float)
 
-    State vector (8D): [cx, cy, w, h, vcx, vcy, vw, vh]
-    Measurement (4D):  [cx, cy, w, h]
 
-    Constant-velocity model: position += velocity each step.
-    """
+def xyah_to_tlbr(xyah) -> np.ndarray:
+    cx, cy, a, h = np.asarray(xyah, dtype=float)[:4]
+    w = a * h
+    return np.array([cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0], dtype=float)
 
-    def __init__(self):
-        dt = 1.0  # one time step per frame
 
-        # Transition matrix F: position += velocity
-        self.F = np.eye(8, dtype=np.float32)
-        for i in range(4):
-            self.F[i, i + 4] = dt
+class KalmanFilterXYAH:
+    """Stateless filter: tracks own their (mean, covariance); this object holds the model."""
 
-        # Measurement matrix H: observe [cx, cy, w, h] only
-        self.H = np.eye(4, 8, dtype=np.float32)
+    def __init__(self) -> None:
+        ndim = 4
+        self._motion_mat = np.eye(2 * ndim)
+        for i in range(ndim):
+            self._motion_mat[i, ndim + i] = 1.0
+        self._update_mat = np.eye(ndim, 2 * ndim)
+        self._std_weight_position = 1.0 / 20
+        self._std_weight_velocity = 1.0 / 160
 
-        # Process noise Q (higher uncertainty on velocities)
-        self.Q = np.diag([
-            1.0, 1.0, 1.0, 1.0,   # position noise
-            0.01, 0.01, 0.0001, 0.0001  # velocity noise (small)
-        ]).astype(np.float32)
+    def initiate(self, measurement) -> tuple[np.ndarray, np.ndarray]:
+        measurement = np.asarray(measurement, dtype=float)
+        mean = np.r_[measurement, np.zeros(4)]
+        h = measurement[3]
+        std = [
+            2 * self._std_weight_position * h, 2 * self._std_weight_position * h, 1e-2,
+            2 * self._std_weight_position * h,
+            10 * self._std_weight_velocity * h, 10 * self._std_weight_velocity * h, 1e-5,
+            10 * self._std_weight_velocity * h,
+        ]
+        return mean, np.diag(np.square(std))
 
-        # Measurement noise R (observation uncertainty)
-        self.R = np.diag([1.0, 1.0, 10.0, 10.0]).astype(np.float32)
+    def predict(self, mean, covariance) -> tuple[np.ndarray, np.ndarray]:
+        h = mean[3]
+        std_pos = [self._std_weight_position * h, self._std_weight_position * h, 1e-2,
+                   self._std_weight_position * h]
+        std_vel = [self._std_weight_velocity * h, self._std_weight_velocity * h, 1e-5,
+                   self._std_weight_velocity * h]
+        motion_cov = np.diag(np.square(np.r_[std_pos, std_vel]))
+        mean = self._motion_mat @ mean
+        covariance = self._motion_mat @ covariance @ self._motion_mat.T + motion_cov
+        return mean, covariance
 
-        # State covariance P
-        self.P = np.diag([10.0, 10.0, 10.0, 10.0,
-                          10000.0, 10000.0, 10000.0, 10000.0]).astype(np.float32)
+    def project(self, mean, covariance) -> tuple[np.ndarray, np.ndarray]:
+        h = mean[3]
+        std = [self._std_weight_position * h, self._std_weight_position * h, 1e-1,
+               self._std_weight_position * h]
+        innovation_cov = np.diag(np.square(std))
+        return (self._update_mat @ mean,
+                self._update_mat @ covariance @ self._update_mat.T + innovation_cov)
 
-        self.mean = np.zeros(8, dtype=np.float32)
-
-    def initiate(self, bbox: np.ndarray) -> None:
-        """Initialise state from first detection [cx, cy, w, h]."""
-        self.mean[:4] = bbox.astype(np.float32)
-        self.mean[4:] = 0.0
-        # Scale initial covariance by bbox size
-        std = max(bbox[2], bbox[3])
-        self.P = np.diag([2*std, 2*std, 2*std, 2*std,
-                          10*std, 10*std, 10*std, 10*std]).astype(np.float32)
-
-    def predict(self) -> np.ndarray:
-        """Kalman predict step. Returns predicted [cx, cy, w, h]."""
-        self.mean = self.F @ self.mean
-        self.P = self.F @ self.P @ self.F.T + self.Q
-        # Clamp width/height to positive
-        self.mean[2] = max(self.mean[2], 1.0)
-        self.mean[3] = max(self.mean[3], 1.0)
-        return self.mean[:4].copy()
-
-    def update(self, measurement: np.ndarray) -> np.ndarray:
-        """Kalman update step with new detection [cx, cy, w, h]."""
-        z = measurement.astype(np.float32)
-        S = self.H @ self.P @ self.H.T + self.R          # innovation covariance
-        K = self.P @ self.H.T @ np.linalg.inv(S)         # Kalman gain
-        y = z - self.H @ self.mean                        # innovation
-        self.mean = self.mean + K @ y
-        self.P = (np.eye(8, dtype=np.float32) - K @ self.H) @ self.P
-        return self.mean[:4].copy()
-
-    @property
-    def bbox(self) -> np.ndarray:
-        """Return current estimated [cx, cy, w, h]."""
-        return self.mean[:4].copy()
-
-    @property
-    def tlbr(self) -> np.ndarray:
-        """Return [x1, y1, x2, y2] for IoU computation."""
-        cx, cy, w, h = self.mean[:4]
-        return np.array([cx - w/2, cy - h/2, cx + w/2, cy + h/2], dtype=np.float32)
+    def update(self, mean, covariance, measurement) -> tuple[np.ndarray, np.ndarray]:
+        projected_mean, projected_cov = self.project(mean, covariance)
+        chol, lower = scipy.linalg.cho_factor(projected_cov, lower=True, check_finite=False)
+        kalman_gain = scipy.linalg.cho_solve(
+            (chol, lower), (covariance @ self._update_mat.T).T, check_finite=False).T
+        innovation = np.asarray(measurement, dtype=float) - projected_mean
+        new_mean = mean + innovation @ kalman_gain.T
+        new_cov = covariance - kalman_gain @ projected_cov @ kalman_gain.T
+        return new_mean, new_cov
