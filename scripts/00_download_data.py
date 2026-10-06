@@ -23,10 +23,14 @@ from __future__ import annotations
 import argparse
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.kaggle_cli import kaggle_command  # noqa: E402
 DATA = PROJECT_ROOT / "data" / "visdrone"
 
 
@@ -76,7 +80,7 @@ def download_kaggle_zip(slug: str, out: Path) -> Path:
     if zip_path.exists():
         print(f"reusing existing {zip_path}")
         return zip_path
-    subprocess.run(["kaggle", "datasets", "download", "-d", slug, "-p", str(dl_dir)], check=True)
+    subprocess.run([*kaggle_command(), "datasets", "download", "-d", slug, "-p", str(dl_dir)], check=True)
     if not zip_path.exists():
         found = sorted(dl_dir.glob("*.zip"))
         if len(found) != 1:

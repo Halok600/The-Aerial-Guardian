@@ -13,9 +13,13 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from src.utils.kaggle_cli import kaggle_command  # noqa: E402
 STAGE = ROOT / "build" / "kaggle-code"
 
 
@@ -35,9 +39,9 @@ def main() -> None:
     (STAGE / "dataset-metadata.json").write_text(json.dumps(meta, indent=2))
 
     if args.new:
-        cmd = ["kaggle", "datasets", "create", "-p", str(STAGE), "--dir-mode", "zip"]
+        cmd = [*kaggle_command(), "datasets", "create", "-p", str(STAGE), "--dir-mode", "zip"]
     else:
-        cmd = ["kaggle", "datasets", "version", "-p", str(STAGE), "--dir-mode", "zip", "-m", "update code"]
+        cmd = [*kaggle_command(), "datasets", "version", "-p", str(STAGE), "--dir-mode", "zip", "-m", "update code"]
     subprocess.run(cmd, check=True)
 
 

@@ -88,3 +88,9 @@ def test_notebook_uses_helpers_and_budget():
     assert first_code < nb_src.index("pip")  # clock starts before pip install
     assert "from notebook_helpers import" in nb_src and "compute_time_budget(" in nb_src
     assert "time=budget_h" in nb_src and "SESSION_LIMIT_H = 11.0" in nb_src and "RESERVE_H = 1.0" in nb_src
+
+
+def test_notebook_unpacks_code_zips_via_helper_not_into_code_root():
+    nb_src = (ROOT / "kaggle" / "train_notebook.py").read_text(encoding="utf-8")
+    assert "unpack_code_zips(CODE)" in nb_src
+    assert "extractall(CODE)" not in nb_src

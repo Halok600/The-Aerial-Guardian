@@ -76,3 +76,25 @@ def compute_time_budget(time_hours: float, elapsed_h: float, session_limit_h: fl
             f"refusing to start a pointless run"
         )
     return budget
+
+
+def unpack_code_zips(code_dir: str | Path) -> list[str]:
+    """Unpack top-level `<name>.zip` files of the copied code dataset into `code_dir/<name>/`, then delete them.
+
+    `kaggle datasets create --dir-mode zip` zips each subdirectory with the directory as zip
+    root, so src.zip holds `pipeline.py`, not `src/pipeline.py`; extracting into the code root
+    would misplace everything. If Kaggle already mounted the folder extracted, the zip (if any)
+    is just removed. Returns the names of the zips that were unpacked.
+    """
+    import zipfile
+
+    code_dir = Path(code_dir)
+    unpacked: list[str] = []
+    for z in sorted(code_dir.glob("*.zip")):
+        target = code_dir / z.stem
+        if not target.exists():
+            with zipfile.ZipFile(z) as zf:
+                zf.extractall(target)
+            unpacked.append(z.name)
+        z.unlink()
+    return unpacked

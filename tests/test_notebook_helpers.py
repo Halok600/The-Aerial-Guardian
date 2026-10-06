@@ -68,3 +68,41 @@ def test_compute_time_budget():
 def test_push_code_stages_helpers_at_dataset_root():
     src = (ROOT / "kaggle" / "push_code.py").read_text(encoding="utf-8")
     assert 'ROOT / "kaggle" / "notebook_helpers.py", STAGE)' in src
+
+
+def _zip(path: Path, members: dict[str, bytes]) -> None:
+    import zipfile
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+
+
+def test_unpack_code_zips_extracts_prefixless_zip_into_its_folder(tmp_path):
+    code = tmp_path / "code"
+    code.mkdir()
+    _zip(code / "src.zip", {"pipeline.py": b"p", "utils/classes.py": b"c"})
+    _zip(code / "scripts.zip", {"01_build_dataset.py": b"b"})
+    (code / "notebook_helpers.py").write_text("h")
+    assert nh.unpack_code_zips(code) == ["scripts.zip", "src.zip"]
+    assert (code / "src" / "pipeline.py").read_bytes() == b"p"
+    assert (code / "src" / "utils" / "classes.py").read_bytes() == b"c"
+    assert (code / "scripts" / "01_build_dataset.py").read_bytes() == b"b"
+    assert not (code / "01_build_dataset.py").exists() and not (code / "pipeline.py").exists()
+    assert not list(code.glob("*.zip")) and (code / "notebook_helpers.py").exists()
+
+
+def test_unpack_code_zips_leaves_existing_folder_alone(tmp_path):
+    code = tmp_path / "code"
+    (code / "src").mkdir(parents=True)
+    (code / "src" / "pipeline.py").write_text("mounted")
+    _zip(code / "src.zip", {"pipeline.py": b"from-zip"})
+    assert nh.unpack_code_zips(code) == []
+    assert (code / "src" / "pipeline.py").read_text() == "mounted"
+    assert not (code / "src.zip").exists()
+
+
+def test_unpack_code_zips_without_zips_is_noop(tmp_path):
+    code = tmp_path / "code"
+    (code / "src").mkdir(parents=True)
+    assert nh.unpack_code_zips(code) == []
+    assert sorted(p.name for p in code.iterdir()) == ["src"]

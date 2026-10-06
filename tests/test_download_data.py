@@ -90,9 +90,10 @@ def test_download_kaggle_zip_uses_plain_cli_list_without_unzip(tmp_path, monkeyp
         _make_zip(tmp_path / "_downloads" / "visdrone2019-mot.zip", {"a/b.txt": b"x"})
 
     monkeypatch.setattr(dl.subprocess, "run", fake_run)
+    monkeypatch.setattr(dl, "kaggle_command", lambda: ["/venv/Scripts/kaggle.exe"])
     zp = dl.download_kaggle_zip("owner/visdrone2019-mot", tmp_path)
     cmd, check, kw = calls[0]
-    assert cmd == ["kaggle", "datasets", "download", "-d", "owner/visdrone2019-mot",
+    assert cmd == ["/venv/Scripts/kaggle.exe", "datasets", "download", "-d", "owner/visdrone2019-mot",
                    "-p", str(tmp_path / "_downloads")]
     assert check is True and not kw.get("shell")
     assert "--unzip" not in cmd and zp.name == "visdrone2019-mot.zip"

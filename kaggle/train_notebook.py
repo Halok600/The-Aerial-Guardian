@@ -21,7 +21,6 @@ import shutil
 import subprocess
 import sys
 import time
-import zipfile
 from pathlib import Path
 
 T0 = time.time()  # session clock for the time budget; keep before pip install
@@ -38,12 +37,10 @@ BATCH = 8 if SCALE == "s" else 16
 RUN_NAME = f"yolo26{SCALE}-p2"
 
 shutil.copytree("/kaggle/input/aerial-guardian-code", CODE, dirs_exist_ok=True)
-for z in list(CODE.glob("*.zip")):
-    zipfile.ZipFile(z).extractall(CODE)
-    z.unlink()
-print(sorted(p.name for p in CODE.iterdir()))
 sys.path.insert(0, str(CODE))  # push_code.py stages notebook_helpers.py at the dataset root
-from notebook_helpers import compute_time_budget, resolve_mot_dir
+from notebook_helpers import compute_time_budget, resolve_mot_dir, unpack_code_zips
+unpack_code_zips(CODE)  # `--dir-mode zip` zips have no src/ or scripts/ prefix: unpack each into CODE/<name>/
+print(sorted(p.name for p in CODE.iterdir()))
 
 # %% Download VisDrone DET (Ultralytics asset mirror, same URLs as VisDrone.yaml)
 from ultralytics.utils import ASSETS_URL
