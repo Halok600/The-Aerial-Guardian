@@ -22,6 +22,8 @@
  * Shifts larger than `radius` are not recovered.
  */
 export function estimateShift(prev, curr, w, h, radius = 8, gate = 0.9) {
+  // Frame too small for the search window: no sample positions, so every mean would be 0/0 = NaN.
+  if (!(w > 2 * radius && h > 2 * radius)) return [0, 0];
   let best = Infinity, bestSad = Infinity, sad00 = Infinity, bx = 0, by = 0;
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
@@ -43,12 +45,18 @@ export function estimateShift(prev, curr, w, h, radius = 8, gate = 0.9) {
 export class GlobalMotion {
   constructor(width = 160) { this.w = width; this.prev = null; }
   reset() { this.prev = null; }
+  /** Returns the prev -> curr affine, or null (no warp) for the first frame / while the source size is unknown. */
   update(source, srcW, srcH) {
+    // Video not ready yet (videoWidth/Height still 0): nothing to compare, keep all state untouched.
+    if (!(srcW > 0 && srcH > 0) || !Number.isFinite(srcW) || !Number.isFinite(srcH)) return null;
     const w = this.w, h = Math.max(1, Math.round(srcH * w / srcW));
-    if (!this.canvas || this.canvas.height !== h) {
+    // A different source size or aspect invalidates the previous thumbnail even when the thumbnail
+    // height happens to match.
+    if (!this.canvas || this.canvas.height !== h || this.srcW !== srcW || this.srcH !== srcH) {
       this.canvas = document.createElement('canvas');
       this.canvas.width = w; this.canvas.height = h;
       this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+      this.srcW = srcW; this.srcH = srcH;
       this.prev = null;
     }
     this.ctx.drawImage(source, 0, 0, srcW, srcH, 0, 0, w, h);

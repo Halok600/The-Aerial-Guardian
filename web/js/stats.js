@@ -35,6 +35,11 @@ export function groupCounts(tracks) {
   return out;
 }
 
+function median(values) {
+  const v = [...values].sort((a, b) => a - b), m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
 /**
  * Effective PROCESSED frame rate (EMA of 1/dt over processed frames) and how far apart, in video
  * frames, consecutive processed frames are. poll() publishes at most once per `publishMs` so the
@@ -46,13 +51,24 @@ export class ProcessingRate {
     Object.assign(this, { alpha, publishMs, slowFactor, minSamples });
     this.reset();
   }
-  reset() { this.fps = null; this.apart = null; this.samples = 0; this.lastPublish = null; }
+  reset() { this.fps = null; this.apart = null; this.samples = 0; this.lastPublish = null; this.warm = []; }
   push(dtSeconds, framesApart = 1) {
     if (!Number.isFinite(dtSeconds) || dtSeconds <= 0) return;
     const a = this.alpha, x = 1 / dtSeconds;
     this.fps = this.fps === null ? x : a * x + (1 - a) * this.fps;
     this.apart = this.apart === null ? framesApart : a * framesApart + (1 - a) * this.apart;
     this.samples += 1;
+    // The first step usually includes model warm-up and would dominate the EMA for several frames
+    // (a spurious "slow" hint). Until publishing starts, collect the samples and seed the EMA with
+    // their median, which ignores a single outlier.
+    const seedAt = Math.max(1, this.minSamples);
+    if (this.samples <= seedAt) {
+      this.warm.push([x, framesApart]);
+      if (this.samples === seedAt) {
+        this.fps = median(this.warm.map((s) => s[0]));
+        this.apart = median(this.warm.map((s) => s[1]));
+      }
+    }
   }
   /** { fps, apart, slow } when there are enough samples and >= publishMs since the last publish, else null. */
   poll(nowMs) {
@@ -72,4 +88,21 @@ export class ErrorOnce {
     return true;
   }
   reset() { this.seen.clear(); }
+}
+
+/**
+ * What to do with the "inference is slower than the video" hint. `kind` is the status line's current
+ * class ('', 'ok', 'warn', 'err'). Never overwrites an error; only clears a hint that is still showing.
+ * Returns the new slowShown flag and the action: 'show' | 'clear' | null.
+ */
+export function slowHintAction(slow, slowShown, kind) {
+  if (kind === 'err') return { slowShown: false, action: null };
+  if (slow && !slowShown) return { slowShown: true, action: 'show' };
+  if (!slow && slowShown) return { slowShown: false, action: kind === 'warn' ? 'clear' : null };
+  return { slowShown, action: null };
+}
+
+/** Message text of anything that was thrown (Errors, strings, null, ...). */
+export function errorMessage(e) {
+  return e?.message ?? String(e);
 }

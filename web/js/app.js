@@ -3,7 +3,7 @@ import { ByteTracker, DEFAULT_CONFIG } from './tracker.js';
 import { GROUP_COLORS, GROUP_ORDER } from './classes.js';
 import { GlobalMotion } from './cmc.js';
 import { labelText, trailSegments, labelRect, visibleTracks, overlayMetrics } from './render.js';
-import { FpsMeter, ProcessingRate, ErrorOnce, statsView, groupCounts } from './stats.js';
+import { FpsMeter, ProcessingRate, ErrorOnce, statsView, groupCounts, slowHintAction, errorMessage } from './stats.js';
 import { shouldProcess, describeStep, wallClockDue } from './frameGate.js';
 
 // ---------------------------------------------------------------------
@@ -122,7 +122,9 @@ let lastRunWall = null;
 
 const SLOW_HINT = 'Inference is slower than the video — tracking is coarser; try the lower-resolution input or a faster device.';
 
+let statusKind = '';
 function setStatus(msg, kind = '') {
+  statusKind = kind;
   statusLine.textContent = msg;
   statusLine.className = 'status-line' + (kind ? ' ' + kind : '');
 }
@@ -164,6 +166,7 @@ function beginSource() {
   errorOnce.reset();
   tracker.setFrameRate(30);
   slowShown = false;
+  setStatus('');          // a previous source's error / hint must not outlive it
 }
 
 // Group filter chips hide boxes/labels/trails of a class group; counting continues.
@@ -195,7 +198,7 @@ async function boot() {
   } catch (e) {
     console.error(e);
     bootText.textContent = 'Failed to load model.';
-    setStatus(`Model failed to load: ${e.message}`, 'err');
+    setStatus(`Model failed to load: ${errorMessage(e)}`, 'err');
   } finally {
     bootOverlay.classList.add('hidden');
   }
@@ -384,7 +387,7 @@ sampleBtn.addEventListener('click', async () => {
     loadFile(new File([blob], 'sample-raw.mp4', { type: 'video/mp4' }));
   } catch (e) {
     console.warn('sample clip unavailable', e);
-    setStatus(`Sample clip unavailable (${e.message}). Choose your own file instead.`, 'err');
+    setStatus(`Sample clip unavailable (${errorMessage(e)}). Choose your own file instead.`, 'err');
     sampleBtn.style.display = 'none';
   } finally {
     sampleBtn.disabled = false;
@@ -454,30 +457,41 @@ function onVideoFrame(stamp) {
 /** Feed the effective processed frame rate to the tracker and tell the user when inference lags the video. */
 function applyRate(p) {
   tracker.setFrameRate(Math.min(60, Math.max(1, p.fps)));
-  if (p.slow && !slowShown) {
-    slowShown = true;
-    if (!statusLine.classList.contains('err')) setStatus(SLOW_HINT, 'warn');
-  } else if (!p.slow && slowShown) {
-    slowShown = false;
-    if (statusLine.classList.contains('warn')) setStatus('');
-  }
+  // The hint needs >= minSamples timing samples (ProcessingRate.poll) and never replaces an error.
+  const d = slowHintAction(p.slow, slowShown, statusKind);
+  slowShown = d.slowShown;
+  if (d.action === 'show') setStatus(SLOW_HINT, 'warn');
+  else if (d.action === 'clear') setStatus('');
 }
 
 function reportLoopError(e) {
-  if (errorOnce.report(e.message)) {
+  const msg = errorMessage(e);
+  if (errorOnce.report(msg)) {
     console.error(e);
-    setStatus(`Inference error: ${e.message}`, 'err');
+    setStatus(`Inference error: ${msg}`, 'err');
   }
 }
 
+const RUNNING_MSG = 'Running detection…';
+let runToken = 0;
+let statusBeforeRun = null;
 async function runOnce(source, w, h) {
-  setStatus('Running detection…');
+  const token = ++runToken;
+  // Remember what the status line said before (not our own "Running" text from an overlapping run).
+  if (statusLine.textContent !== RUNNING_MSG) statusBeforeRun = { msg: statusLine.textContent, kind: statusKind };
+  setStatus(RUNNING_MSG);
   try {
     resetTracking();   // a still image is always frame 1, however often the slider re-runs it
-    if (await processFrame(source, w, h)) setStatus('Detection complete.', 'ok');
+    if (await processFrame(source, w, h)) {
+      setStatus('Detection complete.', 'ok');
+    } else if (token === runToken && statusLine.textContent === RUNNING_MSG) {
+      // Result discarded (reset / source change mid-inference) and nothing else has spoken since:
+      // do not leave "Running detection…" up forever.
+      setStatus(statusBeforeRun?.msg ?? '', statusBeforeRun?.kind ?? '');
+    }
   } catch (e) {
     console.error(e);
-    setStatus(`Inference error: ${e.message}`, 'err');
+    setStatus(`Inference error: ${errorMessage(e)}`, 'err');
   }
 }
 confSlider.addEventListener('change', () => {
@@ -540,7 +554,7 @@ function render(tracks, trailLen) {
     octx.strokeStyle = color; octx.lineWidth = m.lineWidth;
     octx.strokeRect(x1, y1, x2 - x1, y2 - y1);
     const label = labelText(t.cls, t.trackId);
-    const r = labelRect(x1, y1, octx.measureText(label).width, m.fontPx, m.pad);
+    const r = labelRect(x1, y1, octx.measureText(label).width, m.fontPx, m.pad, w);
     octx.fillStyle = color; octx.fillRect(r.x, r.y, r.w, r.h);
     octx.fillStyle = '#ffffff'; octx.fillText(label, r.textX, r.textY);
   }
