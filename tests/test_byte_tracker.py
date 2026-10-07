@@ -108,7 +108,7 @@ def test_config_from_yaml(tmp_path):
     p = tmp_path / "t.yaml"
     p.write_text("track_high: 0.3\n")
     cfg = TrackerConfig.from_yaml(p)
-    assert cfg.track_high == 0.3 and cfg.new_track == 0.5
+    assert cfg.track_high == 0.3 and cfg.new_track == TrackerConfig().new_track
     p.write_text("bogus: 1\n")
     with pytest.raises(ValueError):
         TrackerConfig.from_yaml(p)

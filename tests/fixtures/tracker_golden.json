@@ -2,12 +2,12 @@
  "config": {
   "track_high": 0.4,
   "track_low": 0.1,
-  "new_track": 0.5,
-  "match_thresh": 0.8,
+  "new_track": 0.6,
+  "match_thresh": 0.7,
   "second_match_thresh": 0.5,
   "unconfirmed_match_thresh": 0.7,
   "max_time_lost": 30,
-  "fuse_score": true,
+  "fuse_score": false,
   "class_vote_window": 30,
   "min_hits_for_count": 3
  },

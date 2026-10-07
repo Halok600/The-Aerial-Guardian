@@ -11,8 +11,8 @@ import { fuseScore, gateGroups, iouCost, iouMatrix, linearAssignment } from './m
 
 /** Same snake_case keys and values as configs/tracker.yaml (the parity test pins this). */
 export const DEFAULT_CONFIG = {
-  track_high: 0.4, track_low: 0.1, new_track: 0.5, match_thresh: 0.8, second_match_thresh: 0.5,
-  unconfirmed_match_thresh: 0.7, max_time_lost: 30, fuse_score: true, class_vote_window: 30,
+  track_high: 0.4, track_low: 0.1, new_track: 0.6, match_thresh: 0.7, second_match_thresh: 0.5,
+  unconfirmed_match_thresh: 0.7, max_time_lost: 30, fuse_score: false, class_vote_window: 30,
   min_hits_for_count: 3,
 };
 const State = { NEW: 0, TRACKED: 1, LOST: 2, REMOVED: 3 };

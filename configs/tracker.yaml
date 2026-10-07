@@ -2,11 +2,11 @@
 # Tuned on VisDrone2019-MOT-val (scripts/05_eval_mot.py --tune); never on test-dev.
 track_high: 0.4            # detections >= this are "high" (stage 1, may start tracks)
 track_low: 0.1             # detections below this are discarded; [low, high) feed stage 2
-new_track: 0.5             # minimum score to start a new (tentative) track
-match_thresh: 0.8          # stage-1 cost threshold (IoU >= 0.2 after score fusion)
+new_track: 0.6             # minimum score to start a new (tentative) track
+match_thresh: 0.7          # stage-1 cost threshold; cost = 1 - IoU, so IoU >= 0.3 (fuse_score is false)
 second_match_thresh: 0.5   # stage-2 cost threshold for low-score boxes (IoU >= 0.5)
 unconfirmed_match_thresh: 0.7
 max_time_lost: 30          # frames at 30 fps; scaled by the source frame rate
-fuse_score: true
+fuse_score: false          # plain 1 - IoU cost for stages 1 and 3; true would weight IoU by detection score
 class_vote_window: 30      # displayed class = majority of the last N matched classes
 min_hits_for_count: 3      # a track counts toward "unique" totals after N matches
