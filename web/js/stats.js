@@ -34,3 +34,42 @@ export function groupCounts(tracks) {
   for (const t of tracks) out[t.group] += 1;
   return out;
 }
+
+/**
+ * Effective PROCESSED frame rate (EMA of 1/dt over processed frames) and how far apart, in video
+ * frames, consecutive processed frames are. poll() publishes at most once per `publishMs` so the
+ * tracker's frame-rate setting does not jitter. `slow` = processed frames > slowFactor video
+ * frames apart on average (inference slower than the video).
+ */
+export class ProcessingRate {
+  constructor({ alpha = 0.2, publishMs = 1000, slowFactor = 1.5, minSamples = 3 } = {}) {
+    Object.assign(this, { alpha, publishMs, slowFactor, minSamples });
+    this.reset();
+  }
+  reset() { this.fps = null; this.apart = null; this.samples = 0; this.lastPublish = null; }
+  push(dtSeconds, framesApart = 1) {
+    if (!Number.isFinite(dtSeconds) || dtSeconds <= 0) return;
+    const a = this.alpha, x = 1 / dtSeconds;
+    this.fps = this.fps === null ? x : a * x + (1 - a) * this.fps;
+    this.apart = this.apart === null ? framesApart : a * framesApart + (1 - a) * this.apart;
+    this.samples += 1;
+  }
+  /** { fps, apart, slow } when there are enough samples and >= publishMs since the last publish, else null. */
+  poll(nowMs) {
+    if (this.samples < this.minSamples) return null;
+    if (this.lastPublish !== null && nowMs - this.lastPublish < this.publishMs) return null;
+    this.lastPublish = nowMs;
+    return { fps: this.fps, apart: this.apart, slow: this.apart > this.slowFactor };
+  }
+}
+
+/** Reports each distinct error message once (so a failing loop does not flood the console/status line). */
+export class ErrorOnce {
+  constructor() { this.seen = new Set(); }
+  report(message) {
+    if (this.seen.has(message)) return false;
+    this.seen.add(message);
+    return true;
+  }
+  reset() { this.seen.clear(); }
+}

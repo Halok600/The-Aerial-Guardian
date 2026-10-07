@@ -105,6 +105,11 @@ export class ByteTracker {
     this.reset();
   }
   reset() { this.tracked = []; this.lost = []; this.frameId = 0; this.lastId = 0; this.counted = new Map(); }
+  /** Re-derive max_time_lost (in processed frames) from the effective processed frame rate; nothing else changes. */
+  setFrameRate(fps) {
+    if (!Number.isFinite(fps) || fps <= 0) return;
+    this.maxTimeLost = Math.max(3, pyRound(this.cfg.max_time_lost * fps / 30));
+  }
   get totalIds() { return this.lastId; }
   nextId() { this.lastId += 1; return this.lastId; }
   uniqueCounts() {

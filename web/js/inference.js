@@ -107,7 +107,6 @@ export function validateMeta(meta) {
 
 function getOrt() {
   if (!globalThis.window?.ort) throw new Error('onnxruntime-web failed to load from the CDN (check your connection)');
-  globalThis.window.ort.env.wasm.numThreads = 1;   // avoids the COOP/COEP requirement on static hosts
   return globalThis.window.ort;
 }
 
@@ -123,11 +122,12 @@ async function fetchMeta() {
 }
 
 export class Detector {
-  constructor() { this.session = null; this.backend = null; this.meta = null; this.canvas = null; this.ctx = null; }
+  constructor() { this.session = null; this.backend = null; this.meta = null; this.canvas = null; this.ctx = null; this.chw = null; }
 
   async load(onStatus) {
     this.meta = await fetchMeta();
     const ort = getOrt();
+    ort.env.wasm.numThreads = 1;   // set once; avoids the COOP/COEP requirement on static hosts
     let lastErr = null;
     for (const name of ['webgpu', 'wasm']) {
       try {
@@ -152,7 +152,11 @@ export class Detector {
     this.ctx.fillRect(0, 0, size, size);
     this.ctx.drawImage(source, 0, 0, srcW, srcH, lb.padX, lb.padY, lb.newW, lb.newH);
     const { data } = this.ctx.getImageData(0, 0, size, size);
-    const plane = size * size, chw = new Float32Array(3 * plane);
+    // One reusable NCHW buffer (11 MB at 960): detect() awaits session.run before the next frame is
+    // preprocessed (the app's busy gate guarantees it), so the tensor never aliases a live read.
+    const plane = size * size;
+    if (!this.chw || this.chw.length !== 3 * plane) this.chw = new Float32Array(3 * plane);
+    const chw = this.chw;
     for (let i = 0; i < plane; i++) {
       chw[i] = data[4 * i] / 255; chw[plane + i] = data[4 * i + 1] / 255; chw[2 * plane + i] = data[4 * i + 2] / 255;
     }

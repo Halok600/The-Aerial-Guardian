@@ -119,7 +119,10 @@ function rawTensor(cands, N = cands.length) {
 }
 
 test('decodeRaw converts cx,cy,w,h to x1,y1,x2,y2 and takes the best class', () => {
-  const t = rawTensor([[100, 200, 40, 20, { 3: 0.2, 4: 0.8, 9: 0.1 }]]);
+  // N = 6 anchors, the real candidate sits at anchor 2: only a channel-first reader finds it
+  // (an anchor-major reader would read cx from anchor 0 channel 2, etc.).
+  const empty = [0, 0, 0, 0, {}];
+  const t = rawTensor([empty, empty, [100, 200, 40, 20, { 3: 0.2, 4: 0.8, 9: 0.1 }], empty, empty, empty]);
   const out = decodeRaw(t, 0.05, 0.6);
   assert.equal(out.length, 1);
   closeRow(out[0], [80, 190, 120, 210, Math.fround(0.8), 4]);

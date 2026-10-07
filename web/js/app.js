@@ -2,8 +2,9 @@ import { Detector } from './inference.js';
 import { ByteTracker, DEFAULT_CONFIG } from './tracker.js';
 import { GROUP_COLORS, GROUP_ORDER } from './classes.js';
 import { GlobalMotion } from './cmc.js';
-import { labelText, fontPx, trailSegments, labelRect, visibleTracks } from './render.js';
-import { FpsMeter, statsView, groupCounts } from './stats.js';
+import { labelText, trailSegments, labelRect, visibleTracks, overlayMetrics } from './render.js';
+import { FpsMeter, ProcessingRate, ErrorOnce, statsView, groupCounts } from './stats.js';
+import { shouldProcess, describeStep, wallClockDue } from './frameGate.js';
 
 // ---------------------------------------------------------------------
 // Theme
@@ -97,13 +98,29 @@ const tracker = new ByteTracker(DEFAULT_CONFIG);
 const motion = new GlobalMotion();
 const enabledGroups = new Set(GROUP_ORDER);
 const fpsMeter = new FpsMeter(30);
+const rate = new ProcessingRate();       // effective processed-frame rate -> tracker.setFrameRate
+const errorOnce = new ErrorOnce();
 let mode = 'video';
 let running = false;
 let busy = false;
 let rafId = null;
+let rvfcHandle = null;
 let webcamStream = null;
+let currentObjectUrl = null;
 let lastTracks = [];
 let lastTrailLen = 30;
+let slowShown = false;
+
+// Bumped on every reset / source change / stop: a frame whose inference resolves after that
+// belongs to an older generation and is discarded (no phantom tracks after a reset).
+let generation = 0;
+// Identifies the active video loop; callbacks of an older loop stop themselves.
+let loopId = 0;
+// Stamp of the last PROCESSED video frame (see frameGate.js) and its wall-clock time.
+let lastStamp = null;
+let lastRunWall = null;
+
+const SLOW_HINT = 'Inference is slower than the video — tracking is coarser; try the lower-resolution input or a faster device.';
 
 function setStatus(msg, kind = '') {
   statusLine.textContent = msg;
@@ -124,11 +141,29 @@ confVal.textContent = Number(confSlider.value).toFixed(2);
 confSlider.addEventListener('input', () => { confVal.textContent = Number(confSlider.value).toFixed(2); });
 trailSlider.addEventListener('input', () => { trailVal.textContent = trailSlider.value; });
 
+/** Fresh tracking pass on the SAME source (Reset button, loop restart, seek back). */
 function resetTracking() {
+  generation += 1;
   tracker.reset();
   motion.reset();
   fpsMeter.reset();
   lastTracks = [];
+  lastStamp = null;
+}
+
+function resetPass() {
+  resetTracking();
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  updateStats([], 0);
+}
+
+/** A new source (file, webcam, mode switch): also forget the learned frame rate and error history. */
+function beginSource() {
+  resetTracking();
+  rate.reset();
+  errorOnce.reset();
+  tracker.setFrameRate(30);
+  slowShown = false;
 }
 
 // Group filter chips hide boxes/labels/trails of a class group; counting continues.
@@ -137,11 +172,14 @@ filterChips.forEach((chip) => chip.addEventListener('click', () => {
   if (enabledGroups.has(g)) enabledGroups.delete(g); else enabledGroups.add(g);
   chip.classList.toggle('active', enabledGroups.has(g));
   chip.setAttribute('aria-pressed', String(enabledGroups.has(g)));
-  render(visibleTracks(lastTracks, enabledGroups), lastTrailLen);   // repaint now (still image / paused video)
+  repaint();   // still image / paused video
 }));
 
 // Toggling camera-motion compensation mid-stream must not diff against a stale thumbnail.
 cmcToggle.addEventListener('change', () => motion.reset());
+
+function repaint() { render(visibleTracks(lastTracks, enabledGroups), lastTrailLen); }
+window.addEventListener('resize', repaint);   // overlay sizes are in display pixels
 
 // ---------------------------------------------------------------------
 // Boot: load model
@@ -175,27 +213,41 @@ modeTabs.forEach((tab) => {
   });
 });
 
+function releaseObjectUrl() {
+  if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
+}
+
 function stopAll() {
   running = false;
+  loopId += 1;            // stops any rVFC / rAF loop
+  generation += 1;        // discards an in-flight frame
   if (rafId) cancelAnimationFrame(rafId);
   rafId = null;
-  if (webcamStream) {
-    webcamStream.getTracks().forEach((t) => t.stop());
-    webcamStream = null;
-  }
+  if (rvfcHandle !== null && videoEl.cancelVideoFrameCallback) videoEl.cancelVideoFrameCallback(rvfcHandle);
+  rvfcHandle = null;
+  // Stop whichever stream is attached (srcObject beats src, so it must be cleared before a file can play).
+  const stream = videoEl.srcObject || webcamStream;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  webcamStream = null;
+  videoEl.onloadedmetadata = null;
+  imgEl.onload = null;
   videoEl.pause();
+  videoEl.srcObject = null;
   videoEl.removeAttribute('src');
+  videoEl.load();
+  releaseObjectUrl();
   videoEl.style.display = 'none';
   imgEl.style.display = 'none';
   overlay.width = 0; overlay.height = 0;
   recPill.style.display = 'none';
   stageEmpty.style.display = 'flex';
+  webcamBtn.textContent = 'Start Webcam';
 }
 
 function switchMode(next) {
   stopAll();
   mode = next;
-  resetTracking();
+  beginSource();
   updateStats([], 0);
   if (mode === 'webcam') {
     stageEmpty.innerHTML = emptyMsg('Click "Start Webcam" to begin live tracking.');
@@ -235,9 +287,10 @@ dropzone.addEventListener('drop', (e) => {
 function loadFile(file) {
   if (!modelReady) { setStatus('The detector is not loaded, so nothing can be processed.', 'err'); return; }
   stopAll();
-  resetTracking();
+  beginSource();
   updateStats([], 0);
-  const url = URL.createObjectURL(file);
+  currentObjectUrl = URL.createObjectURL(file);
+  const url = currentObjectUrl;
 
   if (file.type.startsWith('video/') || mode === 'video') {
     mode = 'video';
@@ -253,7 +306,7 @@ function loadFile(file) {
       videoEl.play();
       running = true;
       recPill.style.display = 'flex';
-      loopVideo();
+      startVideoLoop(false);
     };
   } else {
     mode = 'image';
@@ -285,7 +338,7 @@ webcamBtn.addEventListener('click', async () => {
     setStatus('Webcam permission denied or unavailable.', 'err');
     return;
   }
-  resetTracking();
+  beginSource();
   videoEl.srcObject = webcamStream;
   videoEl.style.display = 'block';
   videoEl.muted = true;
@@ -297,14 +350,12 @@ webcamBtn.addEventListener('click', async () => {
     running = true;
     recPill.style.display = 'flex';
     webcamBtn.textContent = 'Stop Webcam';
-    loopVideo();
+    startVideoLoop(true);
   };
 });
 
 resetBtn.addEventListener('click', () => {
-  resetTracking();
-  octx.clearRect(0, 0, overlay.width, overlay.height);
-  updateStats([], 0);
+  resetPass();
   setStatus('Tracker state reset.', 'ok');
 });
 
@@ -341,28 +392,89 @@ sampleBtn.addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------
-// Processing loops
+// Processing loops: every PRESENTED video frame is processed at most once (see frameGate.js)
 // ---------------------------------------------------------------------
-async function loopVideo() {
-  if (!running) return;
-  if (!busy && videoEl.readyState >= 2 && !videoEl.paused) {
-    busy = true;
-    try {
-      await processFrame(videoEl, overlay.width, overlay.height);
-    } catch (e) {
-      console.error(e);
-    }
-    busy = false;
+function startVideoLoop(isWebcam) {
+  const id = ++loopId;
+  lastStamp = null;
+  lastRunWall = null;
+  if (typeof videoEl.requestVideoFrameCallback === 'function') {
+    const onFrame = (now, meta) => {
+      if (id !== loopId || !running) return;
+      rvfcHandle = videoEl.requestVideoFrameCallback(onFrame);
+      // Webcam streams: use the presented-frame counter only (their mediaTime is not a reliable clock).
+      onVideoFrame(isWebcam
+        ? { presentedFrames: meta.presentedFrames }
+        : { mediaTime: meta.mediaTime, presentedFrames: meta.presentedFrames });
+    };
+    rvfcHandle = videoEl.requestVideoFrameCallback(onFrame);
+  } else {
+    // No rVFC: poll on rAF but gate on decoded-frame counters, never on currentTime (interpolated in Chrome).
+    const poll = () => {
+      if (id !== loopId || !running) return;
+      rafId = requestAnimationFrame(poll);
+      if (videoEl.readyState < 2 || videoEl.paused) return;
+      const q = videoEl.getVideoPlaybackQuality?.();
+      const stamp = { totalVideoFrames: q?.totalVideoFrames, currentTime: isWebcam ? undefined : videoEl.currentTime };
+      // No counters at all: throttle to the nominal ~30 fps by wall clock.
+      if (!Number.isFinite(stamp.totalVideoFrames) && !wallClockDue(lastRunWall, performance.now())) return;
+      onVideoFrame(stamp);
+    };
+    rafId = requestAnimationFrame(poll);
   }
-  rafId = requestAnimationFrame(loopVideo);
+}
+
+// A loop restart / seek back starts a fresh tracking pass (counters back to 0), like the Reset button.
+videoEl.addEventListener('seeked', () => {
+  if (!running || webcamStream || !lastStamp) return;
+  const prevT = Number.isFinite(lastStamp.mediaTime) ? lastStamp.mediaTime : lastStamp.currentTime;
+  if (Number.isFinite(prevT) && videoEl.currentTime < prevT - 0.5) resetPass();
+});
+
+function onVideoFrame(stamp) {
+  if (busy) return;                                   // keep the busy gate: skip frames while inferring
+  const gate = shouldProcess(lastStamp, stamp);
+  if (!gate.process) return;                          // duplicate presentation of the same frame
+  if (gate.wrapped) resetPass();                      // loop restart: fresh pass (also clears lastStamp)
+  const now = performance.now();
+  if (lastStamp && lastRunWall !== null) {
+    const step = describeStep(lastStamp, stamp, (now - lastRunWall) / 1000);
+    rate.push(step.dt, step.apart);
+    const p = rate.poll(now);
+    if (p) applyRate(p);
+  }
+  lastStamp = stamp;
+  lastRunWall = now;
+  busy = true;
+  processFrame(videoEl, overlay.width, overlay.height)
+    .catch(reportLoopError)
+    .finally(() => { busy = false; });
+}
+
+/** Feed the effective processed frame rate to the tracker and tell the user when inference lags the video. */
+function applyRate(p) {
+  tracker.setFrameRate(Math.min(60, Math.max(1, p.fps)));
+  if (p.slow && !slowShown) {
+    slowShown = true;
+    if (!statusLine.classList.contains('err')) setStatus(SLOW_HINT, 'warn');
+  } else if (!p.slow && slowShown) {
+    slowShown = false;
+    if (statusLine.classList.contains('warn')) setStatus('');
+  }
+}
+
+function reportLoopError(e) {
+  if (errorOnce.report(e.message)) {
+    console.error(e);
+    setStatus(`Inference error: ${e.message}`, 'err');
+  }
 }
 
 async function runOnce(source, w, h) {
   setStatus('Running detection…');
   try {
     resetTracking();   // a still image is always frame 1, however often the slider re-runs it
-    await processFrame(source, w, h);
-    setStatus('Detection complete.', 'ok');
+    if (await processFrame(source, w, h)) setStatus('Detection complete.', 'ok');
   } catch (e) {
     console.error(e);
     setStatus(`Inference error: ${e.message}`, 'err');
@@ -372,13 +484,26 @@ confSlider.addEventListener('change', () => {
   if (mode === 'image' && imgEl.style.display !== 'none') runOnce(imgEl, overlay.width, overlay.height);
 });
 
-async function processFrame(source, w, h) {
+// One ONNX session.run at a time (a second concurrent run on the same session throws), so a still-image
+// re-run or a new source waits for an in-flight video frame instead of overlapping it.
+let inference = Promise.resolve();
+function processFrame(source, w, h) {
+  const run = inference.then(() => processFrameNow(source, w, h));
+  inference = run.catch(() => {});
+  return run;
+}
+
+/** Returns false when the result was discarded because a reset / source change happened mid-inference. */
+async function processFrameNow(source, w, h) {
+  const g = generation;
   const t0 = performance.now();
   const { newTrack, trailLen } = getSettings();
-  const dets = await detector.detect(source, w, h, { conf: DETECTOR_CONF, iou: RAW_NMS_IOU });
-  tracker.cfg.new_track = newTrack;
-  // Camera-motion compensation only makes sense between consecutive video frames.
+  // Camera-motion compensation only makes sense between consecutive video frames. Estimated BEFORE the
+  // await so it sees the same frame the detector preprocesses (detect() reads the frame synchronously).
   const warp = cmcToggle.checked && mode !== 'image' ? motion.update(source, w, h) : null;
+  const dets = await detector.detect(source, w, h, { conf: DETECTOR_CONF, iou: RAW_NMS_IOU });
+  if (g !== generation) return false;
+  tracker.cfg.new_track = newTrack;
   const tracks = tracker.update(dets, warp);
   lastTracks = tracks;
   lastTrailLen = trailLen;
@@ -387,33 +512,35 @@ async function processFrame(source, w, h) {
   fpsMeter.push((performance.now() - t0) / 1000);
   // A single image is one frame: unique-ID counting needs several, so show the per-group tally instead.
   updateStats(tracks, fpsMeter.fps(), dets.length, mode === 'image' ? groupCounts(tracks) : tracker.uniqueCounts());
+  return true;
 }
 
 // ---------------------------------------------------------------------
-// Render — fading trails (per-ID tint), class-group boxes, "class ID:n" labels
+// Render — fading trails (per-ID tint), class-group boxes, "class ID:n" labels.
+// Sizes follow the on-screen scale so lines stay >= 2 CSS px and text >= 11 CSS px on any display.
 // ---------------------------------------------------------------------
 function render(tracks, trailLen) {
   const w = overlay.width, h = overlay.height;
   octx.clearRect(0, 0, w, h);
+  const m = overlayMetrics(w, overlay.clientWidth, h, overlay.clientHeight);
   for (const t of tracks) {                       // trails under boxes
     octx.strokeStyle = colorForId(t.trackId);
-    for (const s of trailSegments(t.history, trailLen)) {
+    for (const s of trailSegments(t.history, trailLen, m.scale)) {
       octx.globalAlpha = s.alpha;
       octx.lineWidth = s.width;
       octx.beginPath(); octx.moveTo(s.x0, s.y0); octx.lineTo(s.x1, s.y1); octx.stroke();
     }
   }
   octx.globalAlpha = 1;
-  const font = fontPx(h);
-  octx.font = `600 ${font}px "JetBrains Mono", monospace`;
+  octx.font = `600 ${m.fontPx}px "JetBrains Mono", monospace`;
   octx.textBaseline = 'bottom';
   for (const t of tracks) {
     const [x1, y1, x2, y2] = t.tlbr;
     const color = GROUP_COLORS[t.group];
-    octx.strokeStyle = color; octx.lineWidth = 2;
+    octx.strokeStyle = color; octx.lineWidth = m.lineWidth;
     octx.strokeRect(x1, y1, x2 - x1, y2 - y1);
     const label = labelText(t.cls, t.trackId);
-    const r = labelRect(x1, y1, octx.measureText(label).width, font);
+    const r = labelRect(x1, y1, octx.measureText(label).width, m.fontPx, m.pad);
     octx.fillStyle = color; octx.fillRect(r.x, r.y, r.w, r.h);
     octx.fillStyle = '#ffffff'; octx.fillText(label, r.textX, r.textY);
   }

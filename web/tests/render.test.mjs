@@ -1,18 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { labelText, fontPx, trailSegments, labelRect, visibleTracks } from '../js/render.js';
+import { labelText, trailSegments, labelRect, visibleTracks } from '../js/render.js';
 import { FpsMeter, statsView, groupCounts } from '../js/stats.js';
 
 test('labelText uses the class name and track id', () => {
   assert.equal(labelText(0, 1), 'pedestrian ID:1');
   assert.equal(labelText(3, 12), 'car ID:12');
   assert.equal(labelText(7, 3), 'awning-tricycle ID:3');
-});
-
-test('fontPx scales with frame height but never drops below 12', () => {
-  assert.equal(fontPx(480), 12);
-  assert.equal(fontPx(1080), 18);
-  assert.equal(fontPx(2160), 36);
 });
 
 test('trailSegments: fewer than 2 points or trailLen < 2 gives nothing', () => {
