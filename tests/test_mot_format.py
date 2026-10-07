@@ -170,5 +170,26 @@ def test_run_trackeval_returns_per_sequence_results(tmp_path):
     assert set(r["per_seq"]) == {"s1", "s2"}
     assert r["per_seq"]["s1"]["MOTA"] == pytest.approx(100.0)
     assert r["per_seq"]["s2"]["MOTA"] == pytest.approx(80.0)          # 1 FN of 5 GT
-    assert set(r["per_seq"]["s2"]) == {"HOTA", "MOTA", "IDF1", "IDSW"}
+    assert set(r["per_seq"]["s2"]) == {"HOTA", "MOTA", "IDF1", "IDSW", "gt_count"}
     assert r["MOTA"] == pytest.approx(100 * (1 - 1 / 15))             # combined pools counts: 1 FN of 15 GT
+
+
+def test_per_seq_group_without_ground_truth_is_null_not_zero(tmp_path):
+    pytest.importorskip("trackeval")
+    from src.eval.trackeval_runner import run_trackeval
+
+    box = lambda f: f"{10 + f},20.00,20.00,40.00"
+    # Sequence A has GT and a perfect tracker; B has no GT at all (as a vehicle-free VisDrone sequence);
+    # C has GT but the tracker output nothing (a real 0.0, not n/a).
+    write_gt(tmp_path / "gt", "T", "A", [f"{f},1,{box(f)},1,1,1" for f in range(1, 6)], 5)
+    write_gt(tmp_path / "gt", "T", "B", [], 5)
+    write_gt(tmp_path / "gt", "T", "C", [f"{f},1,{box(f)},1,1,1" for f in range(1, 6)], 5)
+    write_seqmap(tmp_path / "gt", "T", ["A", "B", "C"])
+    write_tracker(tmp_path / "trk", "T", "t", "A", [f"{f},1,{box(f)},0.9,-1,-1,-1" for f in range(1, 6)])
+    write_tracker(tmp_path / "trk", "T", "t", "B", [])
+    write_tracker(tmp_path / "trk", "T", "t", "C", [])
+    r = run_trackeval(tmp_path / "gt", tmp_path / "trk", "T", ["t"])["t"]["per_seq"]
+    assert r["A"]["gt_count"] == 5 and r["A"]["HOTA"] == pytest.approx(100.0)
+    assert r["B"]["gt_count"] == 0
+    assert all(r["B"][k] is None for k in ("HOTA", "MOTA", "IDF1", "IDSW"))
+    assert r["C"]["gt_count"] == 5 and r["C"]["HOTA"] == 0.0 and r["C"]["MOTA"] == 0.0 and r["C"]["IDSW"] == 0

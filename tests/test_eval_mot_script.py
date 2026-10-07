@@ -108,18 +108,38 @@ def test_check_out_dir_accepts_default_outputs_only():
 
 # ---- variants, grid, Ultralytics config ------------------------------------------------------
 
-def test_grid_is_108_unique_filesystem_safe_names():
+def test_grid_drops_redundant_new_track_below_track_high():
+    import itertools
+
     mod = load_script("05_eval_mot.py")
     args = mod.parse_args(["--tune", "--split", "x/val"])
     variants = mod.build_variants(args, TrackerConfig())
-    assert len(variants) == 108
-    assert len(set(variants)) == 108
+    # new_track < track_high is a no-op (only detections >= track_high can start tracks), so those
+    # combinations are skipped; the expected count is derived from that rule, not hard-coded.
+    expected = sum(1 for combo in itertools.product(*mod.GRID.values())
+                   if dict(zip(mod.GRID, combo))["new_track"] >= dict(zip(mod.GRID, combo))["track_high"])
+    assert len(variants) == expected < 108
+    assert all(cfg.new_track >= cfg.track_high for cfg, _ in variants.values())
+    assert len(set(variants)) == len(variants)
     assert all(re.fullmatch(r"[A-Za-z0-9._-]+", n) for n in variants)
     assert all(use_cmc is True for _, use_cmc in variants.values())            # CMC stays ON for tuning
     assert {cfg.match_thresh for cfg, _ in variants.values()} == {0.7, 0.8, 0.9}
     assert {cfg.fuse_score for cfg, _ in variants.values()} == {True, False}
     small = mod.build_variants(mod.parse_args(["--tune", "--grid-small", "--split", "x/val"]), TrackerConfig())
     assert 1 < len(small) < 10
+
+
+def test_per_seq_table_renders_none_as_na_with_footnote():
+    mod = load_script("05_eval_mot.py")
+    real = {"HOTA": 40.0, "MOTA": 1.0, "IDF1": 2.0, "IDSW": 0, "gt_count": 9}
+    none = {"HOTA": None, "MOTA": None, "IDF1": None, "IDSW": None, "gt_count": 0}
+    zero = {"HOTA": 0.0, "MOTA": 0.0, "IDF1": 0.0, "IDSW": 0, "gt_count": 9}      # GT but no predictions: real 0.0
+    res = {"vehicle": {"ours_cmc": {**real, "per_seq": {"A": real, "B": none, "C": zero}}}}
+    md = mod.per_seq_table(res, mod.TABLE_NAMES)
+    assert "| A | 40.0 |" in md and "| B | n/a |" in md and "| C | 0.0 |" in md
+    assert "n/a: the sequence has no ground-truth objects of this group" in md
+    res["vehicle"]["ours_cmc"]["per_seq"].pop("B")
+    assert "n/a" not in mod.per_seq_table(res, mod.TABLE_NAMES)
 
 
 def test_report_variants_are_explicit_about_cmc():

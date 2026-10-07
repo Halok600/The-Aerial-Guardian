@@ -230,6 +230,9 @@ def build_variants(args: argparse.Namespace, base_cfg: TrackerConfig) -> dict[st
     grid = GRID_SMALL if args.grid_small else GRID
     variants = {}
     for values in itertools.product(*grid.values()):
+        point = dict(zip(grid, values))
+        if point["new_track"] < point["track_high"]:
+            continue    # no-op: only detections >= track_high can start tracks, so this equals new_track == track_high
         name = "_".join(f"{k}{v}" for k, v in zip(grid, values))
         variants[name] = (replace(base_cfg, **dict(zip(grid, values))), True)
     return variants
@@ -268,8 +271,12 @@ def per_seq_table(results: dict[str, dict[str, dict]], names: dict[str, str]) ->
         out += [f"**{group}** (HOTA per sequence)", "",
                 "| Sequence | " + " | ".join(names.get(k, k) for k in keys) + " |",
                 "|---|" + "---|" * len(keys)]
-        out += [f"| {s} | " + " | ".join(f"{res[k]['per_seq'][s]['HOTA']:.1f}" if s in res[k].get("per_seq", {})
-                                         else "-" for k in keys) + " |" for s in seqs]
+        cells = {k: res[k].get("per_seq", {}) for k in keys}
+        out += [f"| {s} | " + " | ".join(
+            "-" if s not in cells[k] else "n/a" if cells[k][s]["HOTA"] is None else f"{cells[k][s]['HOTA']:.1f}"
+            for k in keys) + " |" for s in seqs]
+        if any(cells[k][s]["HOTA"] is None for k in keys for s in cells[k]):
+            out += ["", "n/a: the sequence has no ground-truth objects of this group"]
         out.append("")
     return "\n".join(out)
 
