@@ -7,13 +7,17 @@ Each group is written as its own TrackEval "benchmark", so every group is
 scored on its own GT and its own predictions (TrackEval's fixed class name
 "pedestrian" is only a label for "the one class being evaluated").
 
-GT rows use conf=1 (TrackEval drops conf=0 rows), class=1, visibility=1.
-VisDrone's per-box truncation/occlusion flags are deliberately NOT used to
-filter GT: the official toolkit scores occluded objects too.
-Predictions mostly inside VisDrone ignored regions (IoA > 0.5) are dropped,
-mirroring how the official toolkit treats those regions. TrackEval's own
-distractor preprocessing is disabled (DO_PREPROC=False) because it would
-need MOT-style class ids; we do the equivalent filtering here.
+Protocol:
+  * GT rows use conf=1 (TrackEval drops conf=0 rows), class=1, visibility=1.
+  * Ignored regions (VisDrone category 0, "others" 11, or score 0) are handled
+    symmetrically: GT boxes AND predictions whose IoA with a region of the same
+    frame exceeds 0.5 are both discarded, so a perfect tracker still scores
+    exactly 100 and the filter cannot cap absolute numbers.
+  * VisDrone's per-box truncation/occlusion flags are deliberately NOT used to
+    filter GT: occluded and truncated objects are scored like any other.
+  * TrackEval is run with DO_PREPROC=False. Its preprocessing only removes
+    distractor-class GT and the predictions matched to it; our files contain a
+    single class (1) per group, so it would be a no-op anyway.
 """
 from __future__ import annotations
 
@@ -34,25 +38,28 @@ def limit_frames(frames: dict[int, list[Box]], max_frames: int | None) -> dict[i
     return {f: boxes for f, boxes in frames.items() if f <= max_frames}
 
 
-def gt_lines(frames: dict[int, list[Box]], categories) -> list[str]:
-    cats = set(categories)
-    return [f"{f},{b.track_id},{b.x:.2f},{b.y:.2f},{b.w:.2f},{b.h:.2f},1,1,1"
-            for f in sorted(frames) for b in frames[f] if not b.is_ignore and b.category in cats]
-
-
 def ignore_regions(frames: dict[int, list[Box]]) -> dict[int, np.ndarray]:
     return {f: np.array([[b.x, b.y, b.x + b.w, b.y + b.h] for b in boxes if b.is_ignore]).reshape(-1, 4)
             for f, boxes in frames.items()}
 
 
+def _in_ignored(box_xyxy, regions: np.ndarray | None, ioa_thr: float) -> bool:
+    return (regions is not None and len(regions) > 0
+            and float(ioa_matrix([box_xyxy], regions).max()) > ioa_thr)
+
+
+def gt_lines(frames: dict[int, list[Box]], categories, ioa_thr: float = 0.5) -> list[str]:
+    """GT rows of the given VisDrone categories; boxes inside ignored regions (IoA > ioa_thr) are dropped."""
+    cats = set(categories)
+    ignore = ignore_regions(frames)
+    return [f"{f},{b.track_id},{b.x:.2f},{b.y:.2f},{b.w:.2f},{b.h:.2f},1,1,1"
+            for f in sorted(frames) for b in frames[f]
+            if not b.is_ignore and b.category in cats
+            and not _in_ignored([b.x, b.y, b.x + b.w, b.y + b.h], ignore[f], ioa_thr)]
+
+
 def filter_ignored(rows, ignore: dict[int, np.ndarray], ioa_thr: float = 0.5):
-    kept = []
-    for r in rows:
-        regions = ignore.get(r.frame)
-        if regions is not None and len(regions) and ioa_matrix([[r.x1, r.y1, r.x2, r.y2]], regions).max() > ioa_thr:
-            continue
-        kept.append(r)
-    return kept
+    return [r for r in rows if not _in_ignored([r.x1, r.y1, r.x2, r.y2], ignore.get(r.frame), ioa_thr)]
 
 
 def pred_lines(rows) -> list[str]:

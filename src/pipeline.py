@@ -55,9 +55,11 @@ class Detector:
         self.model = YOLO(str(weights))
 
     def __call__(self, frame: np.ndarray) -> np.ndarray:
+        # `half=` is deprecated in Ultralytics 8.4 (warns on every call); it maps to quantize=16.
+        precision = {"quantize": 16} if self.half else {}
         results = self.model.predict(frame, imgsz=self.s.imgsz, conf=self.s.conf, iou=self.s.iou,
-                                     max_det=self.s.max_det, half=self.half, device=self.device,
-                                     verbose=False)
+                                     max_det=self.s.max_det, device=self.device, verbose=False,
+                                     **precision)
         return parse_detections(results[0])
 
 
