@@ -1,5 +1,9 @@
 import { Detector } from './inference.js';
-import { ByteTracker } from './tracker.js';
+import { ByteTracker, DEFAULT_CONFIG } from './tracker.js';
+import { GROUP_COLORS, GROUP_ORDER } from './classes.js';
+import { GlobalMotion } from './cmc.js';
+import { labelText, fontPx, trailSegments, labelRect, visibleTracks } from './render.js';
+import { FpsMeter, statsView, groupCounts } from './stats.js';
 
 // ---------------------------------------------------------------------
 // Theme
@@ -35,7 +39,8 @@ const io = new IntersectionObserver(
 document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
 
 // ---------------------------------------------------------------------
-// ID -> color (golden-angle hue), mirrors src/utils/visualizer.py
+// ID -> color (golden-angle hue), mirrors src/utils/visualizer.py.
+// Used for trails only; boxes and labels take their colour from the class group.
 // ---------------------------------------------------------------------
 const colorCache = new Map();
 function colorForId(id) {
@@ -62,6 +67,9 @@ const fileInput = document.getElementById('fileInput');
 const dropzone = document.getElementById('dropzone');
 const webcamBtn = document.getElementById('webcamBtn');
 const resetBtn = document.getElementById('resetBtn');
+const sampleBtn = document.getElementById('sampleBtn');
+const cmcToggle = document.getElementById('cmcToggle');
+const filterChips = document.querySelectorAll('#filterChips .chip');
 
 const fpsVal = document.getElementById('fpsVal');
 const backendVal = document.getElementById('backendVal');
@@ -84,33 +92,56 @@ const modeTabs = document.querySelectorAll('.mode-tab');
 // State
 // ---------------------------------------------------------------------
 let detector = null;
-let tracker = new ByteTracker();
+let modelReady = false;
+const tracker = new ByteTracker(DEFAULT_CONFIG);
+const motion = new GlobalMotion();
+const enabledGroups = new Set(GROUP_ORDER);
+const fpsMeter = new FpsMeter(30);
 let mode = 'video';
 let running = false;
 let busy = false;
 let rafId = null;
 let webcamStream = null;
-let trails = new Map();
-let fpsWindow = [];
-let lastTick = 0;
-let totalIdsSeen = 0;
+let lastTracks = [];
+let lastTrailLen = 30;
 
 function setStatus(msg, kind = '') {
   statusLine.textContent = msg;
   statusLine.className = 'status-line' + (kind ? ' ' + kind : '');
 }
 
+// The detector always runs at a low score floor so ByteTrack's low-score stage has input;
+// the slider only controls the tracker's new-track threshold.
+const DETECTOR_CONF = 0.05;
+const RAW_NMS_IOU = 0.6;   // used only for the 'raw' export layout
+
 function getSettings() {
-  const conf = parseFloat(confSlider.value);
-  return {
-    confThresh: conf,
-    iouThresh: 0.45,
-    trailLen: parseInt(trailSlider.value, 10),
-  };
+  return { newTrack: parseFloat(confSlider.value), trailLen: parseInt(trailSlider.value, 10) };
 }
 
-confSlider.addEventListener('input', () => { confVal.textContent = confSlider.value; });
+confSlider.value = DEFAULT_CONFIG.new_track;
+confVal.textContent = Number(confSlider.value).toFixed(2);
+confSlider.addEventListener('input', () => { confVal.textContent = Number(confSlider.value).toFixed(2); });
 trailSlider.addEventListener('input', () => { trailVal.textContent = trailSlider.value; });
+
+function resetTracking() {
+  tracker.reset();
+  motion.reset();
+  fpsMeter.reset();
+  lastTracks = [];
+}
+
+// Group filter chips hide boxes/labels/trails of a class group; counting continues.
+filterChips.forEach((chip) => chip.addEventListener('click', () => {
+  const g = chip.dataset.group;
+  if (enabledGroups.has(g)) enabledGroups.delete(g); else enabledGroups.add(g);
+  chip.classList.toggle('active', enabledGroups.has(g));
+  chip.setAttribute('aria-pressed', String(enabledGroups.has(g)));
+  render(visibleTracks(lastTracks, enabledGroups), lastTrailLen);   // repaint now (still image / paused video)
+}));
+
+// Toggling camera-motion compensation mid-stream must not diff against a stale thumbnail.
+cmcToggle.addEventListener('change', () => motion.reset());
 
 // ---------------------------------------------------------------------
 // Boot: load model
@@ -120,11 +151,13 @@ async function boot() {
   try {
     const backend = await detector.load((msg) => { bootText.textContent = msg; });
     backendVal.textContent = backend.toUpperCase();
+    modelReady = true;
     setStatus(`Model loaded on ${backend.toUpperCase()}. Choose a source to begin.`, 'ok');
+    probeSample();
   } catch (e) {
     console.error(e);
-    bootText.textContent = 'Failed to load model — see console.';
-    setStatus('Model failed to load. Try a different browser (Chrome/Edge recommended).', 'err');
+    bootText.textContent = 'Failed to load model.';
+    setStatus(`Model failed to load: ${e.message}`, 'err');
   } finally {
     bootOverlay.classList.add('hidden');
   }
@@ -162,9 +195,7 @@ function stopAll() {
 function switchMode(next) {
   stopAll();
   mode = next;
-  tracker.reset();
-  trails.clear();
-  totalIdsSeen = 0;
+  resetTracking();
   updateStats([], 0);
   if (mode === 'webcam') {
     stageEmpty.innerHTML = emptyMsg('Click "Start Webcam" to begin live tracking.');
@@ -202,10 +233,10 @@ dropzone.addEventListener('drop', (e) => {
 });
 
 function loadFile(file) {
+  if (!modelReady) { setStatus('The detector is not loaded, so nothing can be processed.', 'err'); return; }
   stopAll();
-  tracker.reset();
-  trails.clear();
-  totalIdsSeen = 0;
+  resetTracking();
+  updateStats([], 0);
   const url = URL.createObjectURL(file);
 
   if (file.type.startsWith('video/') || mode === 'video') {
@@ -247,15 +278,14 @@ function setModeTab(m) {
 // ---------------------------------------------------------------------
 webcamBtn.addEventListener('click', async () => {
   if (running) { stopAll(); switchMode('webcam'); return; }
+  if (!modelReady) { setStatus('The detector is not loaded, so nothing can be processed.', 'err'); return; }
   try {
     webcamStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
   } catch (e) {
     setStatus('Webcam permission denied or unavailable.', 'err');
     return;
   }
-  tracker.reset();
-  trails.clear();
-  totalIdsSeen = 0;
+  resetTracking();
   videoEl.srcObject = webcamStream;
   videoEl.style.display = 'block';
   videoEl.muted = true;
@@ -272,12 +302,42 @@ webcamBtn.addEventListener('click', async () => {
 });
 
 resetBtn.addEventListener('click', () => {
-  tracker.reset();
-  trails.clear();
-  totalIdsSeen = 0;
+  resetTracking();
   octx.clearRect(0, 0, overlay.width, overlay.height);
   updateStats([], 0);
   setStatus('Tracker state reset.', 'ok');
+});
+
+// ---------------------------------------------------------------------
+// Sample clip (assets/demo/sample-raw.mp4 may not be deployed: hide the button then)
+// ---------------------------------------------------------------------
+const SAMPLE_URL = 'assets/demo/sample-raw.mp4';
+
+async function probeSample() {
+  try {
+    const res = await fetch(SAMPLE_URL, { method: 'HEAD' });
+    const type = res.headers.get('content-type') || '';
+    sampleBtn.style.display = res.ok && !type.includes('text/html') ? 'inline-flex' : 'none';
+  } catch (e) {
+    sampleBtn.style.display = 'none';
+  }
+}
+
+sampleBtn.addEventListener('click', async () => {
+  sampleBtn.disabled = true;
+  setStatus('Fetching sample clip…');
+  try {
+    const res = await fetch(SAMPLE_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    loadFile(new File([blob], 'sample-raw.mp4', { type: 'video/mp4' }));
+  } catch (e) {
+    console.warn('sample clip unavailable', e);
+    setStatus(`Sample clip unavailable (${e.message}). Choose your own file instead.`, 'err');
+    sampleBtn.style.display = 'none';
+  } finally {
+    sampleBtn.disabled = false;
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -300,11 +360,12 @@ async function loopVideo() {
 async function runOnce(source, w, h) {
   setStatus('Running detection…');
   try {
+    resetTracking();   // a still image is always frame 1, however often the slider re-runs it
     await processFrame(source, w, h);
     setStatus('Detection complete.', 'ok');
   } catch (e) {
     console.error(e);
-    setStatus('Inference error — see console.', 'err');
+    setStatus(`Inference error: ${e.message}`, 'err');
   }
 }
 confSlider.addEventListener('change', () => {
@@ -313,99 +374,63 @@ confSlider.addEventListener('change', () => {
 
 async function processFrame(source, w, h) {
   const t0 = performance.now();
-  const { confThresh, iouThresh, trailLen } = getSettings();
-  const dets = await detector.detect(source, w, h, { confThresh, iouThresh });
-  // Keep the tracker's high/low confidence buckets in lockstep with the
-  // user-facing confidence slider, otherwise a low slider value surfaces
-  // raw detections that the tracker's (higher, hardcoded) thresholds would
-  // silently refuse to ever promote into a confirmed track.
-  tracker.trackThresh = confThresh;
-  tracker.lowThresh = confThresh * 0.4;
-  const tracks = tracker.update(dets);
-  render(tracks, trailLen);
+  const { newTrack, trailLen } = getSettings();
+  const dets = await detector.detect(source, w, h, { conf: DETECTOR_CONF, iou: RAW_NMS_IOU });
+  tracker.cfg.new_track = newTrack;
+  // Camera-motion compensation only makes sense between consecutive video frames.
+  const warp = cmcToggle.checked && mode !== 'image' ? motion.update(source, w, h) : null;
+  const tracks = tracker.update(dets, warp);
+  lastTracks = tracks;
+  lastTrailLen = trailLen;
+  render(visibleTracks(tracks, enabledGroups), trailLen);
 
-  const dt = (performance.now() - t0) / 1000;
-  fpsWindow.push(dt);
-  if (fpsWindow.length > 30) fpsWindow.shift();
-  const avg = fpsWindow.reduce((a, b) => a + b, 0) / fpsWindow.length;
-  const fps = avg > 0 ? 1 / avg : 0;
-
-  updateStats(tracks, fps, dets.length);
+  fpsMeter.push((performance.now() - t0) / 1000);
+  // A single image is one frame: unique-ID counting needs several, so show the per-group tally instead.
+  updateStats(tracks, fpsMeter.fps(), dets.length, mode === 'image' ? groupCounts(tracks) : tracker.uniqueCounts());
 }
 
 // ---------------------------------------------------------------------
-// Render — boxes, fading trails, ID labels (mirrors visualizer.py)
+// Render — fading trails (per-ID tint), class-group boxes, "class ID:n" labels
 // ---------------------------------------------------------------------
 function render(tracks, trailLen) {
   const w = overlay.width, h = overlay.height;
   octx.clearRect(0, 0, w, h);
-
-  const activeIds = new Set();
-  for (const t of tracks) {
-    activeIds.add(t.trackId);
-    if (!trails.has(t.trackId)) trails.set(t.trackId, []);
-    const arr = trails.get(t.trackId);
-    const [cx, cy] = t.kalman.bbox;
-    arr.push([cx, cy]);
-    while (arr.length > trailLen) arr.shift();
-  }
-  for (const id of Array.from(trails.keys())) {
-    if (!activeIds.has(id)) trails.delete(id);
-  }
-
-  // Trails first (under boxes)
-  for (const t of tracks) {
-    const pts = trails.get(t.trackId);
-    if (!pts || pts.length < 2) continue;
-    const color = colorForId(t.trackId);
-    for (let i = 1; i < pts.length; i++) {
-      const alpha = i / pts.length;
-      octx.strokeStyle = color;
-      octx.globalAlpha = 0.15 + 0.65 * alpha;
-      octx.lineWidth = Math.max(1, 3 * alpha);
-      octx.beginPath();
-      octx.moveTo(pts[i - 1][0], pts[i - 1][1]);
-      octx.lineTo(pts[i][0], pts[i][1]);
-      octx.stroke();
+  for (const t of tracks) {                       // trails under boxes
+    octx.strokeStyle = colorForId(t.trackId);
+    for (const s of trailSegments(t.history, trailLen)) {
+      octx.globalAlpha = s.alpha;
+      octx.lineWidth = s.width;
+      octx.beginPath(); octx.moveTo(s.x0, s.y0); octx.lineTo(s.x1, s.y1); octx.stroke();
     }
   }
   octx.globalAlpha = 1;
-
-  // Boxes + labels
-  octx.font = '600 15px "JetBrains Mono", monospace';
+  const font = fontPx(h);
+  octx.font = `600 ${font}px "JetBrains Mono", monospace`;
   octx.textBaseline = 'bottom';
   for (const t of tracks) {
-    const [cx, cy, tw, th] = t.kalman.bbox;
-    const x1 = cx - tw / 2, y1 = cy - th / 2;
-    const color = colorForId(t.trackId);
-
-    octx.strokeStyle = color;
-    octx.lineWidth = 2.5;
-    octx.strokeRect(x1, y1, tw, th);
-
-    const label = `ID ${t.trackId}`;
-    const metrics = octx.measureText(label);
-    const lw = metrics.width + 12, lh = 20;
-    const ly = Math.max(0, y1 - lh);
-    octx.fillStyle = color;
-    octx.fillRect(x1, ly, lw, lh);
-    octx.fillStyle = '#04141a';
-    octx.fillText(label, x1 + 6, ly + lh - 4);
+    const [x1, y1, x2, y2] = t.tlbr;
+    const color = GROUP_COLORS[t.group];
+    octx.strokeStyle = color; octx.lineWidth = 2;
+    octx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    const label = labelText(t.cls, t.trackId);
+    const r = labelRect(x1, y1, octx.measureText(label).width, font);
+    octx.fillStyle = color; octx.fillRect(r.x, r.y, r.w, r.h);
+    octx.fillStyle = '#ffffff'; octx.fillText(label, r.textX, r.textY);
   }
 }
 
 // ---------------------------------------------------------------------
 // Stats
 // ---------------------------------------------------------------------
-function updateStats(tracks, fps, detCount = 0) {
-  fpsVal.textContent = fps.toFixed(1);
-  hudFps.textContent = `${fps.toFixed(1)} FPS`;
-  trackVal.textContent = tracks.length;
-  hudTracks.textContent = `${tracks.length} tracked`;
-  detVal.textContent = detCount;
-  const maxId = tracks.reduce((m, t) => Math.max(m, t.trackId), 0);
-  totalIdsSeen = Math.max(totalIdsSeen, maxId, tracker._idCounter || 0);
-  idVal.textContent = totalIdsSeen;
+function updateStats(tracks, fps, detCount = 0, counts = {}) {
+  const v = statsView({ tracks: tracks.length, fps, detections: detCount, totalIds: tracker.totalIds, counts });
+  fpsVal.textContent = v.fps;
+  hudFps.textContent = v.hudFps;
+  trackVal.textContent = v.tracks;
+  hudTracks.textContent = v.hudTracks;
+  detVal.textContent = v.detections;
+  idVal.textContent = v.totalIds;
+  for (const g of GROUP_ORDER) document.getElementById(`count-${g}`).textContent = v.counts[g];
 }
 
 // Init default mode UI

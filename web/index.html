@@ -111,7 +111,8 @@
         <div style="display:flex; gap:10px; margin-top:14px; align-items:center; flex-wrap:wrap;">
           <div class="dropzone" id="dropzone">Choose file / drag &amp; drop</div>
           <button class="btn btn-primary btn-sm" id="webcamBtn" style="display:none">Start Webcam</button>
-          <button class="btn btn-ghost btn-sm" id="resetBtn">Reset Tracker IDs</button>
+          <button class="btn btn-ghost btn-sm" id="resetBtn">Reset Tracker &amp; Counts</button>
+          <button class="btn btn-ghost btn-sm" id="sampleBtn" style="display:none">Try a sample clip</button>
           <input type="file" id="fileInput" accept="video/*,image/*" style="display:none">
           <span class="status-line" id="statusLine" style="margin-left:auto">Loading model…</span>
         </div>
@@ -127,16 +128,33 @@
           <div class="stat-row"><span>Total IDs assigned</span><span class="v" id="idVal">0</span></div>
         </div>
 
+        <div class="panel counters-card">
+          <div class="panel-title">Unique objects</div>
+          <div class="counter-row" data-group="person"><span class="swatch"></span>Persons<span class="v" id="count-person">0</span></div>
+          <div class="counter-row" data-group="vehicle"><span class="swatch"></span>Vehicles<span class="v" id="count-vehicle">0</span></div>
+          <div class="counter-row" data-group="two-wheeler"><span class="swatch"></span>Two-wheelers<span class="v" id="count-two-wheeler">0</span></div>
+          <div class="counter-row" data-group="tricycle"><span class="swatch"></span>Tricycles<span class="v" id="count-tricycle">0</span></div>
+          <div class="filter-chips" id="filterChips" role="group" aria-label="Show class groups">
+            <button class="chip active" data-group="person" aria-pressed="true">Persons</button>
+            <button class="chip active" data-group="vehicle" aria-pressed="true">Vehicles</button>
+            <button class="chip active" data-group="two-wheeler" aria-pressed="true">Two-wheelers</button>
+            <button class="chip active" data-group="tricycle" aria-pressed="true">Tricycles</button>
+          </div>
+          <p class="hint">Counts distinct tracks seen for a few frames, per class group. Chips only hide boxes; counting continues.</p>
+        </div>
+
         <div class="panel">
           <div class="panel-title">Settings</div>
           <div class="field">
-            <label>Confidence threshold <span class="fv" id="confVal">0.08</span></label>
-            <input type="range" id="confSlider" min="0.02" max="0.8" step="0.01" value="0.08">
+            <label>New-track confidence <span class="fv" id="confVal">0.50</span></label>
+            <input type="range" id="confSlider" min="0.2" max="0.9" step="0.05" value="0.5">
           </div>
           <div class="field">
             <label>Trail length <span class="fv" id="trailVal">30</span></label>
             <input type="range" id="trailSlider" min="0" max="60" step="5" value="30">
           </div>
+          <label class="toggle-row"><input type="checkbox" id="cmcToggle" checked> Camera-motion compensation</label>
+          <p class="hint">Translation-only; helps on panning footage. Video and webcam only.</p>
         </div>
 
         <div class="privacy-note">
