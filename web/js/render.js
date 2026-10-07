@@ -45,10 +45,14 @@ export function trailSegments(history, trailLen, scale = 1) {
   return segs;
 }
 
-/** Label background + text anchor for a box whose top-left is (x1, y1). */
-export function labelRect(x1, y1, textWidth, font, pad = 4) {
+/**
+ * Label background + text anchor for a box whose top-left is (x1, y1). With `canvasW` the chip is
+ * shifted left so it stays fully inside the canvas (and never starts left of x = 0).
+ */
+export function labelRect(x1, y1, textWidth, font, pad = 4, canvasW = Infinity) {
   const w = textWidth + 2 * pad, h = font + 1.5 * pad, y = Math.max(0, y1 - h);
-  return { x: x1, y, w, h, textX: x1 + pad, textY: y + h - 0.75 * pad };
+  const x = Math.max(0, Math.min(x1, canvasW - w));
+  return { x, y, w, h, textX: x + pad, textY: y + h - 0.75 * pad };
 }
 
 /** Tracks whose class group is currently switched on in the filter chips. */

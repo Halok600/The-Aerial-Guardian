@@ -147,3 +147,71 @@ test('GlobalMotion returns null first, then a prev->curr translation in source p
     delete globalThis.document;
   }
 });
+
+test('estimateShift: a frame too small for the search radius returns [0, 0] instead of NaN scores', () => {
+  const r = 8;
+  for (const [w, h] of [[16, 90], [160, 16], [10, 10], [0, 0], [2 * r - 1, 2 * r - 1]]) {
+    const a = new Uint8Array(Math.max(1, w * h)).fill(100), b = new Uint8Array(Math.max(1, w * h)).fill(100);
+    assert.deepEqual(estimateShift(a, b, w, h, r), [0, 0], `${w}x${h}`);
+  }
+});
+
+// Fake canvas/DOM for GlobalMotion: records allocations; pixel source is `fake.current`.
+function fakeDom(w, hOf) {
+  const fake = { current: null, canvases: 0 };
+  globalThis.document = {
+    createElement: () => {
+      fake.canvases += 1;
+      const canvas = { width: 0, height: 0 };
+      canvas.getContext = () => ({
+        drawImage() {},
+        getImageData: () => {
+          const h = canvas.height, data = new Uint8ClampedArray(w * h * 4);
+          for (let i = 0; i < w * h; i++) data.fill(fake.current(i % w, Math.floor(i / w), h), 4 * i, 4 * i + 3);
+          return { data };
+        },
+      });
+      return canvas;
+    },
+  };
+  return fake;
+}
+
+test('GlobalMotion.update is a no-op returning null when the source size is not known yet (0 or non-finite)', async () => {
+  const { GlobalMotion } = await import('../js/cmc.js');
+  const fake = fakeDom(160);
+  try {
+    fake.current = () => 128;
+    const gm = new GlobalMotion(160);
+    for (const [sw, sh] of [[0, 0], [640, 0], [0, 360], [NaN, 360], [640, NaN], [undefined, undefined]]) {
+      assert.equal(gm.update({}, sw, sh), null, `${sw}x${sh}`);
+    }
+    assert.equal(fake.canvases, 0, 'no canvas allocated, no state touched');
+    assert.equal(gm.prev, null);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('GlobalMotion drops its previous thumbnail when the source size / aspect changes', async () => {
+  const { GlobalMotion } = await import('../js/cmc.js');
+  const fake = fakeDom(160);
+  try {
+    const px = (dx, dy) => (x, y) => Math.max(0, Math.min(255, Math.round(128 + 60 * Math.sin((x - dx) / 5) + 60 * Math.cos((y - dy) / 7))));
+    const gm = new GlobalMotion(160);
+    fake.current = px(0, 0);
+    assert.equal(gm.update({}, 640, 360), null);          // first frame: 160x90 thumbnail
+    fake.current = px(3, 0);
+    assert.ok(gm.update({}, 640, 360));                   // same source size: estimate
+    // Different source size with the SAME thumbnail height (160x90 from 1280x720) must still reset.
+    fake.current = px(3, 0);
+    assert.equal(gm.update({}, 1280, 720), null);
+    fake.current = px(5, 0);
+    assert.ok(gm.update({}, 1280, 720));
+    // Aspect change: thumbnail height differs, again no diff against the stale frame.
+    fake.current = px(5, 0);
+    assert.equal(gm.update({}, 640, 480), null);
+  } finally {
+    delete globalThis.document;
+  }
+});

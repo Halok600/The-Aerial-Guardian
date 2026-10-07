@@ -149,3 +149,45 @@ test('ErrorOnce reports each distinct message once until reset', () => {
   e.reset();
   assert.equal(e.report('boom'), true);
 });
+
+// ------------------------------------------------------------ slow-hint gating / error text
+test('ProcessingRate: a slow first step (model warm-up) does not flash the slow hint', () => {
+  const r = new ProcessingRate();
+  r.push(0.4, 12);                                    // first step: warm-up outlier
+  r.push(1 / 30, 1); r.push(1 / 30, 1);
+  const p = r.poll(2000);
+  assert.ok(p);
+  assert.equal(p.slow, false);
+  assert.ok(Math.abs(p.fps - 30) < 1e-9);
+});
+
+test('ProcessingRate: no slow verdict before minSamples, and a genuinely slow source is still flagged after', () => {
+  const r = new ProcessingRate();
+  r.push(0.3, 9); r.push(0.3, 9);
+  assert.equal(r.poll(5000), null);
+  r.push(0.3, 9);
+  assert.equal(r.poll(5000).slow, true);
+});
+
+test('slowHintAction shows / clears the hint and never overwrites an error status', async () => {
+  const { slowHintAction } = await import('../js/stats.js');
+  assert.deepEqual(slowHintAction(true, false, ''), { slowShown: true, action: 'show' });
+  assert.deepEqual(slowHintAction(true, true, 'warn'), { slowShown: true, action: null });
+  assert.deepEqual(slowHintAction(false, true, 'warn'), { slowShown: false, action: 'clear' });
+  assert.deepEqual(slowHintAction(false, true, 'ok'), { slowShown: false, action: null });   // someone else's status stays
+  assert.deepEqual(slowHintAction(false, false, ''), { slowShown: false, action: null });
+  // error status: refuse to show, and do not latch slowShown so the hint can appear once the error is gone
+  assert.deepEqual(slowHintAction(true, false, 'err'), { slowShown: false, action: null });
+  assert.deepEqual(slowHintAction(false, true, 'err'), { slowShown: false, action: null });
+});
+
+test('errorMessage copes with Errors, strings, null and message-less values', async () => {
+  const { errorMessage } = await import('../js/stats.js');
+  assert.equal(errorMessage(new Error('boom')), 'boom');
+  assert.equal(errorMessage('plain string'), 'plain string');
+  assert.equal(errorMessage(null), 'null');
+  assert.equal(errorMessage(undefined), 'undefined');
+  assert.equal(errorMessage(42), '42');
+  assert.equal(errorMessage({ message: 'from object' }), 'from object');
+  assert.equal(errorMessage({ code: 7 }), '[object Object]');
+});

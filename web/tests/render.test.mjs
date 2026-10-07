@@ -72,3 +72,14 @@ test('groupCounts tallies tracks per class group (used for single images, where 
   assert.deepEqual(c, { person: 2, vehicle: 1, 'two-wheeler': 0, tricycle: 0 });
   assert.deepEqual(groupCounts([]), { person: 0, vehicle: 0, 'two-wheeler': 0, tricycle: 0 });
 });
+
+test('labelRect keeps the chip fully inside the canvas on the right edge (and never left of 0)', () => {
+  const r = labelRect(950, 80, 60, 18, 4, 1000);        // chip is 68 wide: 950 + 68 > 1000
+  assert.equal(r.x, 932);
+  assert.equal(r.x + r.w, 1000);
+  assert.equal(r.textX, r.x + 4);
+  assert.equal(labelRect(100, 80, 60, 18, 4, 1000).x, 100);        // already inside: unchanged
+  assert.equal(labelRect(-20, 80, 60, 18, 4, 1000).x, 0);          // box starting left of the canvas
+  assert.equal(labelRect(10, 80, 60, 18, 4, 40).x, 0);             // chip wider than the canvas: pinned to 0
+  assert.equal(labelRect(950, 80, 60, 18).x, 950);                 // no canvas width given: legacy behaviour
+});
