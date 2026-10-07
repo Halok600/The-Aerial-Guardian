@@ -3,12 +3,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.data.visdrone import parse_mot_file
+from src.data.visdrone import Box, parse_mot_file
 from src.eval.mot_format import (
     EVAL_GROUPS, filter_ignored, gt_lines, ignore_regions, limit_frames, pred_lines,
     write_gt, write_seqmap, write_tracker,
 )
 from src.pipeline import TrackRow
+from src.utils.classes import group_of
 
 FIX = Path(__file__).parent / "fixtures" / "visdrone" / "mot_sample.txt"
 
@@ -105,3 +106,90 @@ def test_trackeval_zero_confidence_gt_rows_are_ignored(tmp_path):
     preds = ["1,1,10.00,20.00,20.00,40.00,0.9,-1,-1,-1"]
     r = _run(tmp_path, gt, preds, 1)
     assert r["MOTA"] == pytest.approx(100.0)
+
+
+def test_gt_lines_drop_boxes_inside_ignore_regions():
+    # Same IoA > 0.5 rule as for predictions: GT mostly inside an ignored region is discarded too.
+    frames = parse_mot_file(FIX)
+    frames[1] = frames[1] + [Box(500, 10, 20, 40, category=1, score=1, track_id=9)]   # fully inside (500,0,100,100)
+    frames[1] = frames[1] + [Box(480, 10, 50, 40, category=1, score=1, track_id=8)]   # 60% inside
+    assert not any(l.split(",")[1] in ("9", "8") for l in gt_lines(frames, EVAL_GROUPS["person"]))
+    # ignore regions of the *same frame* only: frame 2 has no region, so the frame-1 box position is kept there
+    frames[2] = frames[2] + [Box(500, 10, 20, 40, category=1, score=1, track_id=7)]
+    assert any(l.startswith("2,7,") for l in gt_lines(frames, EVAL_GROUPS["person"]))
+
+
+def _synthetic_split(root, n=5):
+    seq = root / "sequences" / "s1"
+    seq.mkdir(parents=True)
+    for i in range(1, n + 1):
+        (seq / f"{i:07d}.jpg").write_bytes(b"")
+    (root / "annotations").mkdir()
+    lines = []
+    for f in range(1, n + 1):
+        lines += [f"{f},1,{10 + f},10,20,40,1,1,0,0",          # person, clear of the ignored region
+                  f"{f},2,500,20,20,40,1,1,0,0",              # person inside the ignored region
+                  f"{f},3,100,200,60,30,1,4,0,0",             # car
+                  f"{f},-1,480,0,100,100,0,0,0,0"]            # ignored region
+    (root / "annotations" / "s1.txt").write_text("\n".join(lines) + "\n")
+
+
+def test_gt_as_prediction_scores_100_with_ignore_region_over_a_gt_box(tmp_path):
+    pytest.importorskip("trackeval")
+    from tests.helpers import load_script
+    from src.eval.trackeval_runner import run_trackeval
+
+    mod = load_script("05_eval_mot.py")
+    _synthetic_split(tmp_path / "split")
+    ignores = mod.prepare_gt(tmp_path / "split", ["s1"], tmp_path / "gt")
+    frames = parse_mot_file(tmp_path / "split" / "annotations" / "s1.txt")
+    rows = [TrackRow(f, b.track_id, b.x, b.y, b.x + b.w, b.y + b.h, 0.9, group_of(b.category - 1))
+            for f in sorted(frames) for b in frames[f] if not b.is_ignore]
+    mod.write_rows(tmp_path / "trk", "gt_as_pred", "s1", rows, ignores["s1"])
+    for group in EVAL_GROUPS:
+        r = run_trackeval(tmp_path / "gt", tmp_path / "trk", group, ["gt_as_pred"])["gt_as_pred"]
+        assert r["MOTA"] == pytest.approx(100.0), group
+        assert r["IDF1"] == pytest.approx(100.0), group
+        assert r["HOTA"] == pytest.approx(100.0), group
+        assert r["IDSW"] == 0
+
+
+def test_run_trackeval_returns_per_sequence_results(tmp_path):
+    pytest.importorskip("trackeval")
+    from src.eval.trackeval_runner import run_trackeval
+
+    box = lambda f, i: f"{10 + 50 * i + f},20.00,20.00,40.00"
+    gt1 = [f"{f},{i},{box(f, i)},1,1,1" for f in range(1, 6) for i in (1, 2)]
+    gt2 = [f"{f},1,{box(f, 1)},1,1,1" for f in range(1, 6)]
+    write_gt(tmp_path / "gt", "T", "s1", gt1, 5)
+    write_gt(tmp_path / "gt", "T", "s2", gt2, 5)
+    write_seqmap(tmp_path / "gt", "T", ["s1", "s2"])
+    write_tracker(tmp_path / "trk", "T", "t", "s1", [f"{f},{i},{box(f, i)},0.9,-1,-1,-1" for f in range(1, 6) for i in (1, 2)])
+    write_tracker(tmp_path / "trk", "T", "t", "s2", [f"{f},1,{box(f, 1)},0.9,-1,-1,-1" for f in range(1, 5)])   # last frame missed
+    r = run_trackeval(tmp_path / "gt", tmp_path / "trk", "T", ["t"])["t"]
+    assert set(r["per_seq"]) == {"s1", "s2"}
+    assert r["per_seq"]["s1"]["MOTA"] == pytest.approx(100.0)
+    assert r["per_seq"]["s2"]["MOTA"] == pytest.approx(80.0)          # 1 FN of 5 GT
+    assert set(r["per_seq"]["s2"]) == {"HOTA", "MOTA", "IDF1", "IDSW", "gt_count"}
+    assert r["MOTA"] == pytest.approx(100 * (1 - 1 / 15))             # combined pools counts: 1 FN of 15 GT
+
+
+def test_per_seq_group_without_ground_truth_is_null_not_zero(tmp_path):
+    pytest.importorskip("trackeval")
+    from src.eval.trackeval_runner import run_trackeval
+
+    box = lambda f: f"{10 + f},20.00,20.00,40.00"
+    # Sequence A has GT and a perfect tracker; B has no GT at all (as a vehicle-free VisDrone sequence);
+    # C has GT but the tracker output nothing (a real 0.0, not n/a).
+    write_gt(tmp_path / "gt", "T", "A", [f"{f},1,{box(f)},1,1,1" for f in range(1, 6)], 5)
+    write_gt(tmp_path / "gt", "T", "B", [], 5)
+    write_gt(tmp_path / "gt", "T", "C", [f"{f},1,{box(f)},1,1,1" for f in range(1, 6)], 5)
+    write_seqmap(tmp_path / "gt", "T", ["A", "B", "C"])
+    write_tracker(tmp_path / "trk", "T", "t", "A", [f"{f},1,{box(f)},0.9,-1,-1,-1" for f in range(1, 6)])
+    write_tracker(tmp_path / "trk", "T", "t", "B", [])
+    write_tracker(tmp_path / "trk", "T", "t", "C", [])
+    r = run_trackeval(tmp_path / "gt", tmp_path / "trk", "T", ["t"])["t"]["per_seq"]
+    assert r["A"]["gt_count"] == 5 and r["A"]["HOTA"] == pytest.approx(100.0)
+    assert r["B"]["gt_count"] == 0
+    assert all(r["B"][k] is None for k in ("HOTA", "MOTA", "IDF1", "IDSW"))
+    assert r["C"]["gt_count"] == 5 and r["C"]["HOTA"] == 0.0 and r["C"]["MOTA"] == 0.0 and r["C"]["IDSW"] == 0

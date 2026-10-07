@@ -1,4 +1,11 @@
-"""src/eval/trackeval_runner.py — Run TrackEval (HOTA, CLEAR, Identity) on MOTChallenge-format files."""
+"""src/eval/trackeval_runner.py — Run TrackEval (HOTA, CLEAR, Identity) on MOTChallenge-format files.
+
+Returns {tracker: {HOTA, MOTA, IDF1, IDSW, gt_count, "per_seq": {seq: {HOTA, MOTA, IDF1, IDSW, gt_count}}}}.
+A per-sequence entry with gt_count == 0 (no ground truth of the evaluated group) has None metrics.
+The top-level numbers are TrackEval's COMBINED_SEQ: counts (TP/FN/FP/IDSW, ...) are
+pooled over all sequences, so long and crowded sequences weigh more than short ones.
+Use per_seq for the unweighted per-sequence view.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +18,19 @@ def _patch_numpy_aliases() -> None:
     for name, typ in (("float", float), ("int", int), ("bool", bool)):
         if name not in np.__dict__:
             setattr(np, name, typ)
+
+
+def _summary(r: dict, null_without_gt: bool = False) -> dict:
+    """HOTA/MOTA/IDF1 (percent) + IDSW + gt_count. With `null_without_gt`, a sequence that has no
+    ground-truth objects of this group gets None metrics (TrackEval would report a meaningless 0.0)."""
+    gt_count = int(r["Count"]["GT_Dets"])
+    if null_without_gt and gt_count == 0:
+        return {"HOTA": None, "MOTA": None, "IDF1": None, "IDSW": None, "gt_count": 0}
+    return {"HOTA": float(np.mean(r["HOTA"]["HOTA"])) * 100,
+            "MOTA": float(r["CLEAR"]["MOTA"]) * 100,
+            "IDF1": float(r["Identity"]["IDF1"]) * 100,
+            "IDSW": int(r["CLEAR"]["IDSW"]),
+            "gt_count": gt_count}
 
 
 def run_trackeval(gt_root: Path, trackers_root: Path, benchmark: str, trackers: list[str]) -> dict:
@@ -30,9 +50,7 @@ def run_trackeval(gt_root: Path, trackers_root: Path, benchmark: str, trackers: 
     res, _ = trackeval.Evaluator(eval_cfg).evaluate([trackeval.datasets.MotChallenge2DBox(ds_cfg)], metrics)
     out = {}
     for name in trackers:
-        r = res["MotChallenge2DBox"][name]["COMBINED_SEQ"]["pedestrian"]
-        out[name] = {"HOTA": float(np.mean(r["HOTA"]["HOTA"])) * 100,
-                     "MOTA": float(r["CLEAR"]["MOTA"]) * 100,
-                     "IDF1": float(r["Identity"]["IDF1"]) * 100,
-                     "IDSW": int(r["CLEAR"]["IDSW"])}
+        per = res["MotChallenge2DBox"][name]
+        out[name] = {**_summary(per["COMBINED_SEQ"]["pedestrian"]),
+                     "per_seq": {seq: _summary(r["pedestrian"], null_without_gt=True) for seq, r in per.items() if seq != "COMBINED_SEQ"}}
     return out

@@ -5,3 +5,4 @@ kaggle>=1.6
 imageio-ffmpeg>=0.5
 trackeval @ git+https://github.com/JonathonLuiten/TrackEval.git
 lap>=0.5.12  # linear assignment used by Ultralytics' ByteTrack (the 05_eval_mot.py baseline)
+onnxslim>=0.1.82  # graph simplification in scripts/06_export_web.py (the export fails without it)

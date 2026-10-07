@@ -1,0 +1,18 @@
+{
+  "input_size": 960,
+  "output_format": "end2end",
+  "names": [
+    "pedestrian",
+    "people",
+    "bicycle",
+    "car",
+    "van",
+    "truck",
+    "tricycle",
+    "awning-tricycle",
+    "bus",
+    "motor"
+  ],
+  "source_weights": "yolo26n-p2-visdrone.pt",
+  "exported_with": "ultralytics 8.4.174"
+}
