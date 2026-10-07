@@ -289,7 +289,7 @@ def scenarios():
         "cross_group_overlap": cross_group_scenario(),
         "crowd_a": random_scene(505, 70, 8, 0.04, {}, 30.0),
         "crowd_b": random_scene(506, 70, 8, 0.04, {"max_time_lost": 15}, 25.0, n_clones=3),
-        "crowd_c": random_scene(507, 70, 6, 0.01, {"match_thresh": 0.7, "new_track": 0.45}, 30.0, n_clones=3),
+        "crowd_c": random_scene(507, 70, 6, 0.01, {"match_thresh": 0.8, "new_track": 0.45, "fuse_score": True}, 30.0, n_clones=3),
     }
 
 
