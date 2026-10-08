@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The Aerial Guardian — Drone Multi-Object Tracking in Your Browser</title>
-<meta name="description" content="YOLO26-P2 + ByteTrack multi-object tracking of people and vehicles (10 VisDrone classes) in aerial drone footage. Runs entirely in your browser — no server, no upload, no cost.">
+<meta name="description" content="YOLO26-P2 + ByteTrack multi-object tracking of people and vehicles (10 VisDrone classes) in aerial drone footage. Runs entirely in your browser — no inference server, no upload, no cost.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛸</text></svg>">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -38,9 +38,9 @@
 <header class="hero" id="top">
   <div class="hero-blob"></div>
   <div class="container">
-    <div class="eyebrow">Live in your browser · zero servers</div>
+    <div class="eyebrow">Live in your browser · no inference server</div>
     <h1>Track people and vehicles<br><span>from the sky.</span></h1>
-    <p class="lead">A YOLO26-P2 detector for ten VisDrone classes, built for 8–16px aerial targets, paired with a hand-built ByteTrack + Kalman filter tracker and camera-motion compensation — trained on VisDrone and running fully client-side via ONNX Runtime Web.</p>
+    <p class="lead">A YOLO26-P2 detector for ten VisDrone classes, with a stride-4 head for the small targets typical of drone footage, paired with a hand-built ByteTrack + Kalman filter tracker and camera-motion compensation — trained on VisDrone and running fully client-side via ONNX Runtime Web.</p>
     <div class="hero-ctas">
       <a href="#live-demo" class="btn btn-primary">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -51,7 +51,7 @@
     <div class="hero-stats reveal">
       <div class="hero-stat"><div class="val">10</div><div class="lbl">VisDrone Classes</div></div>
       <div class="hero-stat"><div class="val">4</div><div class="lbl">Detection Scales</div></div>
-      <div class="hero-stat"><div class="val">48.8%</div><div class="lbl">Person Recall (browser model)</div></div>
+      <div class="hero-stat"><div class="val">48.8%</div><div class="lbl">Person Recall (n checkpoint, DET-val)</div></div>
       <div class="hero-stat"><div class="val">100%</div><div class="lbl">Client-Side</div></div>
     </div>
   </div>
@@ -62,7 +62,7 @@
     <div class="section-head reveal">
       <div class="eyebrow">Offline renders</div>
       <h2>The full Python pipeline</h2>
-      <p>These clips were rendered by the Python pipeline — YOLO26s-P2 at 1280px + OpenCV ECC camera-motion compensation + ByteTrack — on VisDrone2019-MOT-test-dev sequences. The browser demo below runs the smaller YOLO26n-P2 at 960px with the same tracker logic and a translation-only camera-motion estimate.</p>
+      <p>These clips were rendered by the Python pipeline — YOLO26s-P2 at 1280px + OpenCV ECC camera-motion compensation + ByteTrack — on VisDrone2019-MOT-test-dev sequences. The FPS figure drawn into the clips is the offline render's rate on a GPU, not a browser speed. The browser demo below runs the smaller YOLO26n-P2 at 960px with the same tracker logic and a translation-only camera-motion estimate.</p>
     </div>
     <div class="showcase-grid reveal">
       <div class="panel showcase-card">
@@ -151,7 +151,7 @@
           <div class="panel-title">Settings</div>
           <div class="field">
             <label>New-track confidence <span class="fv" id="confVal">0.60</span></label>
-            <input type="range" id="confSlider" min="0.2" max="0.9" step="0.05" value="0.6">
+            <input type="range" id="confSlider" min="0.4" max="0.9" step="0.05" value="0.6">
           </div>
           <div class="field">
             <label>Trail length <span class="fv" id="trailVal">30</span></label>
@@ -175,13 +175,13 @@
     <div class="section-head reveal">
       <div class="eyebrow">Pipeline</div>
       <h2>Four stages, one forward pass</h2>
-      <p>No SAHI slicing, no multi-pass tiling — a single high-resolution forward pass through a 4-scale detection head handles targets as small as 8px.</p>
+      <p>No SAHI slicing, no multi-pass tiling — a single high-resolution forward pass through a 4-scale detection head, whose stride-4 grid is there for small targets.</p>
     </div>
     <div class="pipeline reveal">
       <div class="panel pipe-card">
         <div class="pipe-num">01</div>
         <h4>Detect — YOLO26-P2</h4>
-        <p>A stride-4 detection level on top of the standard P3/P4/P5 heads — a 240×240 grid at the browser's 960px input — for 8–16px targets that a stride-8 grid barely resolves. Ten VisDrone classes, exported NMS-free for the browser.</p>
+        <p>A stride-4 detection level on top of the standard P3/P4/P5 heads — a 240×240 grid at the browser's 960px input, for small targets: the median pedestrian in DET-val is only about 12px wide and 25px tall, which a stride-8 grid covers with just one or two cells across. Ten VisDrone classes, exported NMS-free for the browser.</p>
         <span class="tag">10 classes</span>
       </div>
       <div class="panel pipe-card">
@@ -193,7 +193,7 @@
       <div class="panel pipe-card">
         <div class="pipe-num">03</div>
         <h4>Track — ByteTrack</h4>
-        <p>A 3-stage Hungarian association (high-conf → low-conf → tentative tracks) over IoU cost, gated by class group, backed by an 8D constant-velocity Kalman filter per track. A track only gets an ID once it is matched on two frames.</p>
+        <p>A 3-stage Hungarian association (high-conf → low-conf → tentative tracks) over IoU cost, gated by class group, backed by an 8D constant-velocity Kalman filter per track. After the first frame, a track only gets an ID once it is matched on two frames.</p>
         <span class="tag">Runs in-browser</span>
       </div>
       <div class="panel pipe-card">
@@ -219,12 +219,12 @@
         <div class="spec-row"><span>Classes</span><span>10 (VisDrone)</span></div>
         <div class="spec-row"><span>Training data</span><span>VisDrone2019-DET-train + MOT-train (56 sequences, every 5th frame)</span></div>
         <div class="spec-row"><span>Detector evaluation</span><span>VisDrone2019-DET-val (548 images)</span></div>
-        <div class="spec-row"><span>Person recall / precision (browser model)</span><span>48.8% / 73.5%</span></div>
-        <div class="spec-row"><span>mAP50 / mAP50-95 (browser model)</span><span>0.429 / 0.246</span></div>
+        <div class="spec-row"><span>Person recall / precision (n checkpoint, one-to-many head + NMS)</span><span>48.8% / 73.5%</span></div>
+        <div class="spec-row"><span>mAP50 / mAP50-95 (n checkpoint, one-to-many head + NMS)</span><span>0.429 / 0.246</span></div>
         <div class="spec-row"><span>Person recall / mAP50 (offline renders)</span><span>62.5% / 0.536</span></div>
         <div class="spec-row"><span>Tracking HOTA, person / vehicle (offline, MOT-test-dev)</span><span>40.2 / 61.7</span></div>
         <div class="spec-row"><span>Tracker</span><span>Custom ByteTrack + Kalman</span></div>
-        <div class="spec-row"><span>Export format</span><span>ONNX (opset 17), NMS-free</span></div>
+        <div class="spec-row"><span>Export format</span><span>ONNX (opset 17), NMS-free one-to-one head (export fidelity checked, not scored)</span></div>
       </div>
       <div style="display:flex; flex-direction:column; gap:22px;">
         <div class="note-card panel">
@@ -233,13 +233,14 @@
         </div>
         <div class="note-card panel">
           <h4>⚠ Model quality — honest limits</h4>
-          <p>Aerial targets of 8–16px are one of the hardest regimes in object detection, and both models are under-trained: a 9.5-hour Kaggle T4 budget ended the browser model at 50 epochs and the offline model at 24. Expect missed detections, especially of small people.</p>
+          <p>Small aerial targets are one of the hardest regimes in object detection (the median person in DET-val is about 12px wide and 25px tall), and both models are under-trained: a 9.5-hour Kaggle T4 budget ended the browser model at 50 epochs and the offline model at 24. Expect missed detections, especially of small people.</p>
           <ul>
-            <li>Browser model (YOLO26n-P2 @960) on VisDrone DET-val: person recall 48.8%, precision 73.5%, mAP50 0.429. The offline renders above use the larger s model at 1280px (62.5% / 79.0% / 0.536).</li>
+            <li>The n model (YOLO26n-P2 @960) on VisDrone DET-val: person recall 48.8%, precision 73.5%, mAP50 0.429. The offline renders above use the larger s model at 1280px (62.5% / 79.0% / 0.536).</li>
+            <li>These scores are for the n checkpoint's one-to-many head with NMS, evaluated in Python. The in-browser model uses the one-to-one NMS-free head, which was checked for export fidelity but not scored, so its accuracy may differ.</li>
             <li>Camera-motion compensation in the browser is translation-only (no rotation or zoom); the offline renders and the reported tracking numbers use OpenCV ECC.</li>
             <li>The browser model returns at most 300 boxes per frame, so very dense scenes lose some.</li>
             <li>Speed depends on your device and backend (WebGPU or WASM); the FPS meter shows the live rate.</li>
-            <li>Lower the confidence slider if objects never get a track; raise it if you see false positives. It sets the score needed to start a new track.</li>
+            <li>Lower the confidence slider (down to 0.4, the detector's own floor for starting a track) if objects never get a track; raise it if you see false positives. It sets the score needed to start a new track.</li>
             <li>Trained and evaluated on VisDrone only; other altitudes, sensors and scenes were not measured.</li>
           </ul>
         </div>

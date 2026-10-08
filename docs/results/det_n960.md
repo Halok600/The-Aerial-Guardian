@@ -1,6 +1,6 @@
 # Detector, YOLO26n-P2 at 960 px (browser model)
 
-Same protocol as [det_s1280.md](det_s1280.md). Produced by `python scripts/04_eval_det.py --weights models/weights/yolo26n-p2-visdrone.pt --imgsz 960 --label "v2 YOLO26n-P2" --out outputs/eval/det_n` (`outputs/eval/det_n/det_table.md`).
+Same protocol as [det_s1280.md](det_s1280.md). Produced by `python scripts/04_eval_det.py --weights models/weights/yolo26n-p2-visdrone.pt --imgsz 960 --label "v2 YOLO26n-P2" --out outputs/eval/det_n --old-onnx outputs/old-model.onnx` (`outputs/eval/det_n/det_table.md`). The v1 model is the ONNX file at commit `b23778a`, extracted as described in the [README](../../README.md#reproduce).
 
 | Model | Person recall @0.25 | Person precision @0.25 | mAP50 (10 cls) | mAP50-95 |
 |---|---|---|---|---|

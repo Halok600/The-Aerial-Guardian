@@ -1,4 +1,5 @@
 import json
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -66,8 +67,9 @@ class FakeModel:
 
     ckpt_path = None
 
-    def __init__(self, per_image, as_torch=False):
+    def __init__(self, per_image, as_torch=False, names=None):
         self.per_image, self.as_torch, self.calls = per_image, as_torch, []
+        self.names = names if names is not None else {0: "person"}
 
     def predict(self, path, imgsz, conf, max_det, verbose):
         from pathlib import Path
@@ -135,6 +137,50 @@ def _result(det_val, with_old):
         new, old if with_old else None, weights="w.pt", imgsz=1280, data="d.yaml", det_val=det_val,
         conf=0.25, old_onnx="old.onnx", old_imgsz=960, label="v2 YOLO26s-P2")
     return mod, new, result
+
+
+def test_old_model_guard_rejects_multiclass_model(det_val):
+    mod = load_script("04_eval_det.py")
+    multi = FakeModel(PREDS, names={i: f"c{i}" for i in range(10)})
+    with pytest.raises(SystemExit, match="one-class person-only"):
+        mod.build_result(FakeModel(PREDS), multi, weights="w.pt", imgsz=1280, data="d.yaml", det_val=det_val,
+                         conf=0.25, old_onnx="web/model/aerial-guardian.onnx")
+    with pytest.raises(SystemExit):
+        mod.require_person_only(FakeModel(PREDS, names={}), "x.onnx")
+    mod.require_person_only(FakeModel(PREDS), "old.onnx")  # one class: accepted
+
+
+def _run_main(mod, monkeypatch, tmp_path, det_val, extra, old_names=None):
+    loaded = []
+
+    def fake_yolo(path, task=None):
+        loaded.append(path)
+        return FakeModel(PREDS, names=old_names if path != "w.pt" else None)
+
+    monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLO=fake_yolo))
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["04_eval_det.py", "--weights", "w.pt", "--det-val", str(det_val),
+                                      "--out", str(out), *extra])
+    mod.main()
+    return loaded, out
+
+
+def test_old_onnx_defaults_to_skipping_v1_row(det_val, tmp_path, monkeypatch):
+    mod = load_script("04_eval_det.py")
+    loaded, out = _run_main(mod, monkeypatch, tmp_path, det_val, [])
+    assert loaded == ["w.pt"]  # the repo's v2 web model is never loaded as "v1"
+    assert "old" not in json.loads((out / "det_metrics.json").read_text())
+
+
+def test_main_rejects_multiclass_old_onnx(det_val, tmp_path, monkeypatch):
+    mod = load_script("04_eval_det.py")
+    old = tmp_path / "old.onnx"
+    old.write_bytes(b"x")
+    names = {i: f"c{i}" for i in range(10)}
+    with pytest.raises(SystemExit, match="one-class person-only"):
+        _run_main(mod, monkeypatch, tmp_path, det_val, ["--old-onnx", str(old)], old_names=names)
+    with pytest.raises(SystemExit, match="does not exist"):
+        _run_main(mod, monkeypatch, tmp_path, det_val, ["--old-onnx", str(tmp_path / "missing.onnx")])
 
 
 def test_build_result_json_structure(det_val):

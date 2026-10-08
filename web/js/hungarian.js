@@ -1,7 +1,8 @@
 /**
  * hungarian.js — Kuhn–Munkres assignment algorithm (rectangular, O(n^3)).
  * Port of the classic Munkres method. Minimises total cost.
- * Track/detection counts here are always small (<100), so O(n^3) is fine.
+ * Counts can reach a few hundred (the model emits up to 300 boxes and dense scenes carry 100+ tracks);
+ * O(n^3) is still acceptable at that size, but it is the per-frame cost to watch in crowded scenes.
  */
 
 export function hungarianSolve(costMatrixIn) {

@@ -55,6 +55,18 @@ def person_scores(model, det_val: Path, imgsz: int, conf: float, person_classes:
             "gt": n_gt, "pred": n_pred}
 
 
+def require_person_only(old, path: str = "") -> None:
+    """Exit loudly unless `old` is the one-class (person-only) v1 model.
+
+    Scoring any other model with person_classes={0} and the v1 label would silently mislabel it.
+    """
+    names = getattr(old, "names", None)
+    if not names or len(names) != 1:
+        n = len(names) if names else 0
+        sys.exit(f"--old-onnx {path or '<model>'} has {n} classes; it must be the one-class person-only v1 model "
+                 f"(extract it from commit b23778a, see the README) or pass --old-onnx '' to skip the v1 row")
+
+
 def build_result(new, old, *, weights: str, imgsz: int, data: str, det_val: Path, conf: float,
                  old_onnx: str = "", old_imgsz: int = 960, label: str = "v2 YOLO26s-P2") -> dict:
     """Run mAP validation + person scoring for the new model, and person scoring for `old` if given."""
@@ -68,6 +80,7 @@ def build_result(new, old, *, weights: str, imgsz: int, data: str, det_val: Path
         }
     }
     if old is not None:
+        require_person_only(old, old_onnx)
         result["old"] = {"weights": old_onnx, "imgsz": old_imgsz,
                          "person": person_scores(old, det_val, old_imgsz, conf, {0},
                                                  desc=Path(old_onnx).name or "old")}
@@ -103,9 +116,9 @@ def main() -> None:
     p.add_argument("--label", default="v2 YOLO26s-P2", help="Row label for the new model in the table")
     p.add_argument("--data", default="configs/data/visdrone10.yaml")
     p.add_argument("--det-val", type=Path, default=Path("data/visdrone/VisDrone2019-DET-val"))
-    p.add_argument("--old-onnx", default="web/model/aerial-guardian.onnx",
-                   help="Previous person-only model (git show <old-commit>:web/model/aerial-guardian.onnx); "
-                        "'' to skip the old-vs-new row")
+    p.add_argument("--old-onnx", default="",
+                   help="Previous one-class person-only model, e.g. extracted from commit b23778a "
+                        "(see the README); '' (default) skips the old-vs-new row")
     p.add_argument("--old-imgsz", type=int, default=960)
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--out", type=Path, default=Path("outputs/eval/det"))
@@ -114,7 +127,11 @@ def main() -> None:
     from ultralytics import YOLO
 
     new = YOLO(args.weights)
-    old = YOLO(args.old_onnx, task="detect") if args.old_onnx and Path(args.old_onnx).exists() else None
+    if args.old_onnx and not Path(args.old_onnx).exists():
+        sys.exit(f"--old-onnx {args.old_onnx} does not exist")
+    old = YOLO(args.old_onnx, task="detect") if args.old_onnx else None
+    if old is not None:
+        require_person_only(old, args.old_onnx)  # fail before the slow new-model validation
     result = build_result(new, old, weights=args.weights, imgsz=args.imgsz, data=args.data,
                           det_val=args.det_val, conf=args.conf, old_onnx=args.old_onnx,
                           old_imgsz=args.old_imgsz, label=args.label)

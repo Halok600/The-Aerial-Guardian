@@ -73,10 +73,12 @@ path; the browser's one-to-one path is checked for export fidelity (3.7) but not
 | VisDrone2019-MOT-val | 7 sequences | Tracker threshold tuning, nothing else |
 | VisDrone2019-MOT-test-dev | 17 sequences | The reported tracking numbers |
 
-The 33-sequence test-challenge split has no public ground truth and is not used. Consecutive video frames are
+The test-challenge split has no public ground truth and is not used. Consecutive video frames are
 near-duplicates, so [scripts/01_build_dataset.py](../scripts/01_build_dataset.py) keeps frames
 `(frame_id - 1) % 5 == 0` of each MOT-train sequence (`--mot-stride`) and adds all of DET-train for scene diversity.
-The tracker is never tuned on test-dev, and the detector is never trained on DET-val or MOT-test-dev.
+The tracker is never tuned on test-dev, and the detector is never trained on DET-val or MOT-test-dev. DET-val is, however,
+also the validation set that picks `best.pt` during training (best epoch 37 of 50 for n, 20 of 24 for s; best and last
+checkpoints differ by about 0.002 mAP50 on it), so its numbers are very slightly optimistic.
 
 Only the evaluation splits live on the development laptop
 ([scripts/00_download_data.py](../scripts/00_download_data.py)); the training splits are downloaded inside the
@@ -149,7 +151,7 @@ new one as a whole, not each change separately.
 
 ### 3.3 Pretrained weights and the transfer check
 
-The first version of this project trained from scratch by mistake. With Ultralytics 8.0.x, my reading of the training
+The first version of this project most likely trained from scratch by mistake. With Ultralytics 8.0.x, my reading of the training
 code was that `YOLO("model.yaml").train(pretrained=True)` loads no weights: `Model.train()` hands weights to the
 trainer only when the model was created from a `.pt` file. The run logged no error, converged to something
 detector-shaped, and produced an mAP50 of 0.196. I have not re-checked this on 8.4.174; the notebook no longer depends
@@ -454,7 +456,8 @@ TrackEval (HOTA, CLEAR MOTA, Identity IDF1, plus ID switches) through
 [src/eval/trackeval_runner.py](../src/eval/trackeval_runner.py). The tables report the pooled sequence-combined
 numbers (so long and crowded sequences weigh more), and a second per-sequence table shows HOTA per sequence. Two
 groups are scored, each as its own TrackEval benchmark: **person** (ground truth pedestrian (1) + people (2) against the
-person tracker group) and **vehicle** (car (4) + van (5) + truck (6) + bus (9) against the vehicle group). Two-wheelers
+person tracker group) and **vehicle** (car (4) + van (5) + truck (6) + bus (9) against the vehicle group; these are VisDrone category
+ids, the web code's class indices for the same group are 3, 4, 5, 8). Two-wheelers
 and tricycles are tracked and drawn but not scored. VisDrone's per-box truncation and occlusion flags are deliberately not
 used to filter ground truth, and TrackEval runs with `DO_PREPROC=False` (its preprocessing only removes distractor
 classes, and each group file has a single class).
@@ -569,8 +572,8 @@ The overlay canvas has the video's pixel size but is displayed scaled; line widt
 `canvas.width / clientWidth` ([web/js/render.js](../web/js/render.js) `overlayMetrics`) so that boxes stay about 2 CSS px and
 labels about 12 CSS px on a phone and on a 4K clip alike. Inference tries the `webgpu` execution provider and falls back to
 `wasm` ([web/js/inference.js](../web/js/inference.js)), with `wasm.numThreads = 1` so the page works on static hosts without
-the cross-origin-isolation headers that multi-threading needs. The confidence slider only changes the tracker's `new_track`;
-the detector always runs at 0.05.
+the cross-origin-isolation headers that multi-threading needs. The confidence slider only changes the tracker's `new_track` and runs from 0.4 to 0.9: a lower value would behave like
+0.4, because only detections at or above `track_high` (0.4) can start a track. The detector always runs at 0.05.
 
 ### 7.6 Limitations
 
@@ -591,7 +594,7 @@ the detector always runs at 0.05.
 
 ## 8. Lessons learned
 
-### 8.1 The detector was trained from scratch
+### 8.1 The detector was (probably) trained from scratch
 
 The original README reported mAP50 0.196, recall 14.5% and precision 62.7% for the person-only YOLOv8n-P2 model, on
 a small split drawn from six VisDrone sequences (1,978 train and 275 validation frames, all from the MOT-val split).

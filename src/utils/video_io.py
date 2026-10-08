@@ -3,6 +3,7 @@
 Profiling showed the GPU loop idled ~50ms/frame waiting on cv2.imread and
 VideoWriter.write; a prefetch thread and an async writer keep it busy.
 """
+import math
 import queue
 import threading
 from pathlib import Path
@@ -16,6 +17,19 @@ import numpy as np
 # Reads frames from disk in a background thread so the GPU loop never waits
 # for cv2.imread (which blocks on JPEG decompression for ~8-15ms per frame).
 # ---------------------------------------------------------------------------
+
+DEFAULT_FPS = 30.0
+MAX_SANE_FPS = 240.0
+
+
+def sane_fps(value) -> float:
+    """Container-reported frame rate, or 30 when it is missing, NaN/inf, non-positive or absurd (> 240)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_FPS
+    return v if math.isfinite(v) and 0 < v <= MAX_SANE_FPS else DEFAULT_FPS
+
 
 class FramePrefetcher:
     """
@@ -54,7 +68,7 @@ class FramePrefetcher:
                 raise FileNotFoundError(f"Cannot open: {source}")
             self.width      = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.height     = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            self.fps_native = self._cap.get(cv2.CAP_PROP_FPS) or 30.0
+            self.fps_native = sane_fps(self._cap.get(cv2.CAP_PROP_FPS))
             self.total_frames = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
         else:
             raise FileNotFoundError(f"Source not found: {source}")

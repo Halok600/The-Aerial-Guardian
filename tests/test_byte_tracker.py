@@ -3,6 +3,7 @@ import pytest
 
 from src.tracker.byte_tracker import ByteTracker, Detection, STrack, TrackerConfig
 from src.tracker.kalman_filter import KalmanFilterXYAH
+from tests.helpers import ROOT
 
 
 def box(cx, cy, w, h, score=0.9, cls=0):
@@ -112,11 +113,11 @@ def test_config_from_yaml(tmp_path):
     p.write_text("bogus: 1\n")
     with pytest.raises(ValueError):
         TrackerConfig.from_yaml(p)
-    assert TrackerConfig.from_yaml("configs/tracker.yaml").track_low == 0.1
+    assert TrackerConfig.from_yaml(ROOT / "configs" / "tracker.yaml").track_low == 0.1
 
 
 def test_dataclass_defaults_equal_tracker_yaml():
-    assert TrackerConfig() == TrackerConfig.from_yaml("configs/tracker.yaml")
+    assert TrackerConfig() == TrackerConfig.from_yaml(ROOT / "configs" / "tracker.yaml")
 
 
 def test_degenerate_boxes_are_dropped_before_tracking():
