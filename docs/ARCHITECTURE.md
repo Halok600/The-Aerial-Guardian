@@ -73,10 +73,12 @@ path; the browser's one-to-one path is checked for export fidelity (3.7) but not
 | VisDrone2019-MOT-val | 7 sequences | Tracker threshold tuning, nothing else |
 | VisDrone2019-MOT-test-dev | 17 sequences | The reported tracking numbers |
 
-The 33-sequence test-challenge split has no public ground truth and is not used. Consecutive video frames are
+The test-challenge split has no public ground truth and is not used. Consecutive video frames are
 near-duplicates, so [scripts/01_build_dataset.py](../scripts/01_build_dataset.py) keeps frames
 `(frame_id - 1) % 5 == 0` of each MOT-train sequence (`--mot-stride`) and adds all of DET-train for scene diversity.
-The tracker is never tuned on test-dev, and the detector is never trained on DET-val or MOT-test-dev.
+The tracker is never tuned on test-dev, and the detector is never trained on DET-val or MOT-test-dev. DET-val is, however,
+also the validation set that picks `best.pt` during training (best epoch 37 of 50 for n, 20 of 24 for s; best and last
+checkpoints differ by about 0.002 mAP50 on it), so its numbers are very slightly optimistic.
 
 Only the evaluation splits live on the development laptop
 ([scripts/00_download_data.py](../scripts/00_download_data.py)); the training splits are downloaded inside the
@@ -570,8 +572,8 @@ The overlay canvas has the video's pixel size but is displayed scaled; line widt
 `canvas.width / clientWidth` ([web/js/render.js](../web/js/render.js) `overlayMetrics`) so that boxes stay about 2 CSS px and
 labels about 12 CSS px on a phone and on a 4K clip alike. Inference tries the `webgpu` execution provider and falls back to
 `wasm` ([web/js/inference.js](../web/js/inference.js)), with `wasm.numThreads = 1` so the page works on static hosts without
-the cross-origin-isolation headers that multi-threading needs. The confidence slider only changes the tracker's `new_track`;
-the detector always runs at 0.05.
+the cross-origin-isolation headers that multi-threading needs. The confidence slider only changes the tracker's `new_track` and runs from 0.4 to 0.9: a lower value would behave like
+0.4, because only detections at or above `track_high` (0.4) can start a track. The detector always runs at 0.05.
 
 ### 7.6 Limitations
 
