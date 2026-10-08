@@ -1,0 +1,105 @@
+# Tracker threshold tuning, VisDrone2019-MOT-val
+
+96 variants, ranked by the mean of person and vehicle HOTA with ECC on. Produced by `python scripts/05_eval_mot.py --tune --split data/visdrone/VisDrone2019-MOT-val` (`outputs/eval/mot_tune/tuning.md`). Every one of the top 33 variants has `new_track` 0.6, the upper edge of the grid, and the top variants differ by hundredths of a HOTA point (52.24 for the winner, 52.20 for the next two).
+
+| Variant | mean HOTA | ID switches |
+|---|---|---|
+| track_high0.4_new_track0.6_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 52.24 | 191 |
+| track_high0.5_new_track0.6_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 52.20 | 133 |
+| track_high0.5_new_track0.6_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 52.20 | 163 |
+| track_high0.5_new_track0.6_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 52.19 | 164 |
+| track_high0.4_new_track0.6_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 52.16 | 188 |
+| track_high0.5_new_track0.6_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 52.15 | 135 |
+| track_high0.3_new_track0.6_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 52.13 | 167 |
+| track_high0.4_new_track0.6_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 52.12 | 172 |
+| track_high0.3_new_track0.6_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 52.09 | 164 |
+| track_high0.4_new_track0.6_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 52.09 | 171 |
+| track_high0.3_new_track0.6_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 52.08 | 216 |
+| track_high0.5_new_track0.6_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 52.07 | 152 |
+| track_high0.3_new_track0.6_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 52.07 | 219 |
+| track_high0.4_new_track0.6_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 52.06 | 193 |
+| track_high0.4_new_track0.6_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 52.04 | 193 |
+| track_high0.5_new_track0.6_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 52.04 | 152 |
+| track_high0.3_new_track0.6_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 51.99 | 206 |
+| track_high0.3_new_track0.6_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 51.98 | 209 |
+| track_high0.3_new_track0.6_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 51.98 | 208 |
+| track_high0.4_new_track0.6_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 51.97 | 150 |
+| track_high0.5_new_track0.6_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 51.96 | 170 |
+| track_high0.5_new_track0.6_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 51.96 | 143 |
+| track_high0.4_new_track0.6_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 51.96 | 153 |
+| track_high0.3_new_track0.6_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 51.96 | 211 |
+| track_high0.5_new_track0.6_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 51.95 | 171 |
+| track_high0.5_new_track0.6_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 51.93 | 142 |
+| track_high0.3_new_track0.6_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 51.78 | 206 |
+| track_high0.4_new_track0.6_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 51.72 | 184 |
+| track_high0.4_new_track0.6_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 51.70 | 181 |
+| track_high0.3_new_track0.6_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 51.70 | 204 |
+| track_high0.5_new_track0.6_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 51.59 | 219 |
+| track_high0.4_new_track0.6_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 51.56 | 249 |
+| track_high0.5_new_track0.6_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 51.54 | 221 |
+| track_high0.5_new_track0.5_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 51.53 | 182 |
+| track_high0.4_new_track0.6_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 51.50 | 252 |
+| track_high0.5_new_track0.5_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 51.48 | 185 |
+| track_high0.5_new_track0.5_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 51.48 | 190 |
+| track_high0.5_new_track0.5_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 51.45 | 190 |
+| track_high0.5_new_track0.5_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 51.43 | 209 |
+| track_high0.5_new_track0.5_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 51.42 | 208 |
+| track_high0.4_new_track0.5_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 51.35 | 230 |
+| track_high0.4_new_track0.5_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 51.34 | 248 |
+| track_high0.4_new_track0.5_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 51.31 | 228 |
+| track_high0.5_new_track0.5_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 51.29 | 189 |
+| track_high0.4_new_track0.5_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 51.27 | 217 |
+| track_high0.4_new_track0.5_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 51.27 | 237 |
+| track_high0.4_new_track0.5_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 51.26 | 219 |
+| track_high0.5_new_track0.5_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 51.25 | 192 |
+| track_high0.5_new_track0.5_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 51.18 | 225 |
+| track_high0.3_new_track0.5_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 51.17 | 221 |
+| track_high0.3_new_track0.5_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 51.17 | 223 |
+| track_high0.5_new_track0.5_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 51.16 | 226 |
+| track_high0.4_new_track0.5_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 51.08 | 229 |
+| track_high0.4_new_track0.5_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 51.04 | 230 |
+| track_high0.4_new_track0.5_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 51.03 | 275 |
+| track_high0.3_new_track0.5_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 51.00 | 284 |
+| track_high0.4_new_track0.5_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 50.98 | 274 |
+| track_high0.3_new_track0.6_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 50.97 | 295 |
+| track_high0.3_new_track0.5_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 50.97 | 291 |
+| track_high0.3_new_track0.6_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 50.96 | 293 |
+| track_high0.3_new_track0.5_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 50.90 | 261 |
+| track_high0.3_new_track0.5_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 50.90 | 263 |
+| track_high0.3_new_track0.5_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 50.82 | 289 |
+| track_high0.3_new_track0.5_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 50.80 | 289 |
+| track_high0.5_new_track0.5_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 50.80 | 307 |
+| track_high0.5_new_track0.5_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 50.78 | 309 |
+| track_high0.3_new_track0.5_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 50.61 | 291 |
+| track_high0.3_new_track0.5_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 50.57 | 291 |
+| track_high0.4_new_track0.4_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 50.56 | 255 |
+| track_high0.4_new_track0.5_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 50.53 | 380 |
+| track_high0.4_new_track0.4_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 50.53 | 277 |
+| track_high0.4_new_track0.5_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 50.51 | 385 |
+| track_high0.4_new_track0.4_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 50.51 | 296 |
+| track_high0.4_new_track0.4_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 50.49 | 273 |
+| track_high0.4_new_track0.4_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 50.48 | 290 |
+| track_high0.4_new_track0.4_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 50.46 | 260 |
+| track_high0.4_new_track0.4_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 50.23 | 269 |
+| track_high0.4_new_track0.4_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 50.21 | 306 |
+| track_high0.3_new_track0.4_max_time_lost30_match_thresh0.9_fuse_scoreTrue | 50.20 | 290 |
+| track_high0.4_new_track0.4_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 50.19 | 270 |
+| track_high0.4_new_track0.4_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 50.18 | 306 |
+| track_high0.3_new_track0.4_max_time_lost60_match_thresh0.9_fuse_scoreTrue | 50.18 | 292 |
+| track_high0.3_new_track0.5_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 50.04 | 464 |
+| track_high0.3_new_track0.5_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 49.94 | 476 |
+| track_high0.3_new_track0.4_max_time_lost60_match_thresh0.8_fuse_scoreTrue | 49.87 | 352 |
+| track_high0.3_new_track0.4_max_time_lost30_match_thresh0.8_fuse_scoreTrue | 49.86 | 347 |
+| track_high0.4_new_track0.4_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 49.67 | 490 |
+| track_high0.4_new_track0.4_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 49.65 | 494 |
+| track_high0.3_new_track0.4_max_time_lost30_match_thresh0.7_fuse_scoreFalse | 49.51 | 390 |
+| track_high0.3_new_track0.4_max_time_lost30_match_thresh0.8_fuse_scoreFalse | 49.49 | 395 |
+| track_high0.3_new_track0.4_max_time_lost60_match_thresh0.8_fuse_scoreFalse | 49.48 | 395 |
+| track_high0.3_new_track0.4_max_time_lost60_match_thresh0.7_fuse_scoreFalse | 49.36 | 398 |
+| track_high0.3_new_track0.4_max_time_lost30_match_thresh0.9_fuse_scoreFalse | 49.30 | 407 |
+| track_high0.3_new_track0.4_max_time_lost30_match_thresh0.7_fuse_scoreTrue | 49.19 | 652 |
+| track_high0.3_new_track0.4_max_time_lost60_match_thresh0.7_fuse_scoreTrue | 49.16 | 666 |
+| track_high0.3_new_track0.4_max_time_lost60_match_thresh0.9_fuse_scoreFalse | 49.15 | 408 |
+
+Best: track_high0.4_new_track0.6_max_time_lost30_match_thresh0.7_fuse_scoreFalse
+{'track_high': 0.4, 'track_low': 0.1, 'new_track': 0.6, 'match_thresh': 0.7, 'second_match_thresh': 0.5, 'unconfirmed_match_thresh': 0.7, 'max_time_lost': 30, 'fuse_score': False, 'class_vote_window': 30, 'min_hits_for_count': 3}

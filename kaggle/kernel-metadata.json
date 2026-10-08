@@ -1,0 +1,16 @@
+{
+  "id": "halok600/aerial-guardian-train-s",
+  "title": "aerial-guardian-train-s",
+  "code_file": "02_train_kaggle.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "halok600/aerial-guardian-code",
+    "akhileswarelluru/visdrone2019-mot"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

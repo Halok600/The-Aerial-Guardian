@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Aerial Guardian — Real-Time Drone Person Tracking</title>
-<meta name="description" content="YOLOv8n-P2 + ByteTrack multi-object tracking for aerial drone footage. Runs entirely in your browser — no server, no upload, no cost.">
+<title>The Aerial Guardian — Drone Multi-Object Tracking in Your Browser</title>
+<meta name="description" content="YOLO26-P2 + ByteTrack multi-object tracking of people and vehicles (10 VisDrone classes) in aerial drone footage. Runs entirely in your browser — no inference server, no upload, no cost.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛸</text></svg>">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -38,9 +38,9 @@
 <header class="hero" id="top">
   <div class="hero-blob"></div>
   <div class="container">
-    <div class="eyebrow">Live in your browser · zero servers</div>
-    <h1>Track every person<br><span>from the sky.</span></h1>
-    <p class="lead">A custom YOLOv8n-P2 detector tuned for 8–16px aerial targets, paired with a hand-built ByteTrack + Kalman filter tracker — trained on VisDrone footage and running fully client-side via ONNX Runtime Web.</p>
+    <div class="eyebrow">Live in your browser · no inference server</div>
+    <h1>Track people and vehicles<br><span>from the sky.</span></h1>
+    <p class="lead">A YOLO26-P2 detector for ten VisDrone classes, with a stride-4 head for the small targets typical of drone footage, paired with a hand-built ByteTrack + Kalman filter tracker and camera-motion compensation — trained on VisDrone and running fully client-side via ONNX Runtime Web.</p>
     <div class="hero-ctas">
       <a href="#live-demo" class="btn btn-primary">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -49,9 +49,9 @@
       <a href="https://github.com/Halok600/The-Aerial-Guardian" target="_blank" rel="noopener" class="btn btn-ghost">View Source</a>
     </div>
     <div class="hero-stats reveal">
-      <div class="hero-stat"><div class="val">2.9M</div><div class="lbl">Parameters</div></div>
+      <div class="hero-stat"><div class="val">10</div><div class="lbl">VisDrone Classes</div></div>
       <div class="hero-stat"><div class="val">4</div><div class="lbl">Detection Scales</div></div>
-      <div class="hero-stat"><div class="val">12.2</div><div class="lbl">GFLOPs</div></div>
+      <div class="hero-stat"><div class="val">48.8%</div><div class="lbl">Person Recall (n checkpoint, DET-val)</div></div>
       <div class="hero-stat"><div class="val">100%</div><div class="lbl">Client-Side</div></div>
     </div>
   </div>
@@ -60,18 +60,22 @@
 <section class="tight">
   <div class="container">
     <div class="section-head reveal">
-      <div class="eyebrow">Server-side reference runs</div>
-      <h2>Trained on a laptop RTX 3050</h2>
-      <p>These clips were produced by the full Python pipeline — YOLOv8n-P2 + OpenCV ECC camera-motion compensation + ByteTrack — running locally with CUDA. The browser demo below runs the same detector and tracker logic, minus ECC.</p>
+      <div class="eyebrow">Offline renders</div>
+      <h2>The full Python pipeline</h2>
+      <p>These clips were rendered by the Python pipeline — YOLO26s-P2 at 1280px + OpenCV ECC camera-motion compensation + ByteTrack — on VisDrone2019-MOT-test-dev sequences. The FPS figure drawn into the clips is the offline render's rate on a GPU, not a browser speed. The browser demo below runs the smaller YOLO26n-P2 at 960px with the same tracker logic and a translation-only camera-motion estimate.</p>
     </div>
     <div class="showcase-grid reveal">
       <div class="panel showcase-card">
         <video src="assets/demo/demo1.mp4" autoplay muted loop playsinline></video>
-        <div class="cap"><span>VisDrone sequence · uav0000305</span><span class="badge">Python pipeline</span></div>
+        <div class="cap"><span>VisDrone sequence · uav0000161_00000_v</span><span class="badge">Offline render</span></div>
       </div>
       <div class="panel showcase-card">
         <video src="assets/demo/demo2.mp4" autoplay muted loop playsinline></video>
-        <div class="cap"><span>VisDrone sequence · uav0000339</span><span class="badge">Python pipeline</span></div>
+        <div class="cap"><span>VisDrone sequence · uav0000073_04464_v</span><span class="badge">Offline render</span></div>
+      </div>
+      <div class="panel showcase-card">
+        <video src="assets/demo/demo3.mp4" autoplay muted loop playsinline></video>
+        <div class="cap"><span>VisDrone sequence · uav0000297_00000_v</span><span class="badge">Offline render</span></div>
       </div>
     </div>
   </div>
@@ -111,7 +115,8 @@
         <div style="display:flex; gap:10px; margin-top:14px; align-items:center; flex-wrap:wrap;">
           <div class="dropzone" id="dropzone">Choose file / drag &amp; drop</div>
           <button class="btn btn-primary btn-sm" id="webcamBtn" style="display:none">Start Webcam</button>
-          <button class="btn btn-ghost btn-sm" id="resetBtn">Reset Tracker IDs</button>
+          <button class="btn btn-ghost btn-sm" id="resetBtn">Reset Tracker &amp; Counts</button>
+          <button class="btn btn-ghost btn-sm" id="sampleBtn" style="display:none">Try a sample clip</button>
           <input type="file" id="fileInput" accept="video/*,image/*" style="display:none">
           <span class="status-line" id="statusLine" style="margin-left:auto">Loading model…</span>
         </div>
@@ -127,16 +132,33 @@
           <div class="stat-row"><span>Total IDs assigned</span><span class="v" id="idVal">0</span></div>
         </div>
 
+        <div class="panel counters-card">
+          <div class="panel-title">Unique objects</div>
+          <div class="counter-row" data-group="person"><span class="swatch"></span>Persons<span class="v" id="count-person">0</span></div>
+          <div class="counter-row" data-group="vehicle"><span class="swatch"></span>Vehicles<span class="v" id="count-vehicle">0</span></div>
+          <div class="counter-row" data-group="two-wheeler"><span class="swatch"></span>Two-wheelers<span class="v" id="count-two-wheeler">0</span></div>
+          <div class="counter-row" data-group="tricycle"><span class="swatch"></span>Tricycles<span class="v" id="count-tricycle">0</span></div>
+          <div class="filter-chips" id="filterChips" role="group" aria-label="Show class groups">
+            <button class="chip active" data-group="person" aria-pressed="true">Persons</button>
+            <button class="chip active" data-group="vehicle" aria-pressed="true">Vehicles</button>
+            <button class="chip active" data-group="two-wheeler" aria-pressed="true">Two-wheelers</button>
+            <button class="chip active" data-group="tricycle" aria-pressed="true">Tricycles</button>
+          </div>
+          <p class="hint">Counts distinct tracks seen for a few frames, per class group. Chips only hide boxes; counting continues.</p>
+        </div>
+
         <div class="panel">
           <div class="panel-title">Settings</div>
           <div class="field">
-            <label>Confidence threshold <span class="fv" id="confVal">0.08</span></label>
-            <input type="range" id="confSlider" min="0.02" max="0.8" step="0.01" value="0.08">
+            <label>New-track confidence <span class="fv" id="confVal">0.60</span></label>
+            <input type="range" id="confSlider" min="0.4" max="0.9" step="0.05" value="0.6">
           </div>
           <div class="field">
             <label>Trail length <span class="fv" id="trailVal">30</span></label>
             <input type="range" id="trailSlider" min="0" max="60" step="5" value="30">
           </div>
+          <label class="toggle-row"><input type="checkbox" id="cmcToggle" checked> Camera-motion compensation</label>
+          <p class="hint">Translation-only; helps on panning footage. Video and webcam only.</p>
         </div>
 
         <div class="privacy-note">
@@ -153,31 +175,31 @@
     <div class="section-head reveal">
       <div class="eyebrow">Pipeline</div>
       <h2>Four stages, one forward pass</h2>
-      <p>No SAHI slicing, no multi-pass tiling — a single high-resolution forward pass through a 4-scale detection head handles targets as small as 8px.</p>
+      <p>No SAHI slicing, no multi-pass tiling — a single high-resolution forward pass through a 4-scale detection head, whose stride-4 grid is there for small targets.</p>
     </div>
     <div class="pipeline reveal">
       <div class="panel pipe-card">
         <div class="pipe-num">01</div>
-        <h4>Detect — YOLOv8n-P2</h4>
-        <p>A stride-4 detection head is grafted onto YOLOv8n's backbone, on top of the standard P3/P4/P5 heads — giving a 320×180 grid at imgsz 1280 for catching 8–16px pedestrians that standard YOLOv8 misses.</p>
-        <span class="tag">2.9M params</span>
+        <h4>Detect — YOLO26-P2</h4>
+        <p>A stride-4 detection level on top of the standard P3/P4/P5 heads — a 240×240 grid at the browser's 960px input, for small targets: the median pedestrian in DET-val is only about 12px wide and 25px tall, which a stride-8 grid covers with just one or two cells across. Ten VisDrone classes, exported NMS-free for the browser.</p>
+        <span class="tag">10 classes</span>
       </div>
       <div class="panel pipe-card">
         <div class="pipe-num">02</div>
-        <h4>Stabilise — ECC CMC</h4>
-        <p>OpenCV's ECC algorithm estimates inter-frame drone ego-motion on a downscaled 320×180 grayscale frame, producing an affine warp used to correct Kalman-predicted positions.</p>
-        <span class="tag">Python only</span>
+        <h4>Stabilise — camera motion</h4>
+        <p>Offline, OpenCV's ECC estimates the drone's motion between frames (rotation + translation, coarse-to-fine). In the browser, a translation-only shift is estimated on a 160px thumbnail. Either way, every Kalman prediction is moved with the camera before matching.</p>
+        <span class="tag">Translation-only in-browser</span>
       </div>
       <div class="panel pipe-card">
         <div class="pipe-num">03</div>
         <h4>Track — ByteTrack</h4>
-        <p>A 3-stage Hungarian association (high-conf → low-conf → lost-track re-activation) over IoU cost, backed by an 8D constant-velocity Kalman filter per track.</p>
+        <p>A 3-stage Hungarian association (high-conf → low-conf → tentative tracks) over IoU cost, gated by class group, backed by an 8D constant-velocity Kalman filter per track. After the first frame, a track only gets an ID once it is matched on two frames.</p>
         <span class="tag">Runs in-browser</span>
       </div>
       <div class="panel pipe-card">
         <div class="pipe-num">04</div>
-        <h4>Render — Trails &amp; HUD</h4>
-        <p>Golden-angle hue spacing gives every track ID a visually distinct, stable color; a single blended overlay draws fading trajectory tails without per-segment cost blow-up.</p>
+        <h4>Render — Labels, trails &amp; counts</h4>
+        <p>Class-group colours, <code>car ID:12</code>-style labels from a majority vote over recent frames, fading trajectory tails, and per-group unique counters.</p>
         <span class="tag">Canvas 2D</span>
       </div>
     </div>
@@ -192,17 +214,17 @@
     </div>
     <div class="spec-grid reveal">
       <div class="panel spec-table">
-        <div class="spec-row"><span>Architecture</span><span>YOLOv8n + P2 head</span></div>
-        <div class="spec-row"><span>Parameters</span><span>2,921,172</span></div>
-        <div class="spec-row"><span>GFLOPs</span><span>12.2</span></div>
-        <div class="spec-row"><span>Classes</span><span>1 (person)</span></div>
-        <div class="spec-row"><span>Training input size</span><span>1280×1280</span></div>
-        <div class="spec-row"><span>Browser inference size</span><span>960×960 (letterboxed)</span></div>
-        <div class="spec-row"><span>Dataset</span><span>VisDrone MOT (7 sequences)</span></div>
-        <div class="spec-row"><span>Train / val frames</span><span>1,978 / 275</span></div>
-        <div class="spec-row"><span>mAP50 / Recall</span><span>0.196 / 14.5%</span></div>
+        <div class="spec-row"><span>Browser model</span><span>YOLO26n + P2 head, 960×960 (letterboxed)</span></div>
+        <div class="spec-row"><span>Offline renders</span><span>YOLO26s + P2 head, 1280px</span></div>
+        <div class="spec-row"><span>Classes</span><span>10 (VisDrone)</span></div>
+        <div class="spec-row"><span>Training data</span><span>VisDrone2019-DET-train + MOT-train (56 sequences, every 5th frame)</span></div>
+        <div class="spec-row"><span>Detector evaluation</span><span>VisDrone2019-DET-val (548 images)</span></div>
+        <div class="spec-row"><span>Person recall / precision (n checkpoint, one-to-many head + NMS)</span><span>48.8% / 73.5%</span></div>
+        <div class="spec-row"><span>mAP50 / mAP50-95 (n checkpoint, one-to-many head + NMS)</span><span>0.429 / 0.246</span></div>
+        <div class="spec-row"><span>Person recall / mAP50 (offline renders)</span><span>62.5% / 0.536</span></div>
+        <div class="spec-row"><span>Tracking HOTA, person / vehicle (offline, MOT-test-dev)</span><span>40.2 / 61.7</span></div>
         <div class="spec-row"><span>Tracker</span><span>Custom ByteTrack + Kalman</span></div>
-        <div class="spec-row"><span>Export format</span><span>ONNX (opset 12)</span></div>
+        <div class="spec-row"><span>Export format</span><span>ONNX (opset 17), NMS-free one-to-one head (export fidelity checked, not scored)</span></div>
       </div>
       <div style="display:flex; flex-direction:column; gap:22px;">
         <div class="note-card panel">
@@ -211,12 +233,15 @@
         </div>
         <div class="note-card panel">
           <h4>⚠ Model quality — honest limits</h4>
-          <p>This detector is trained on a genuinely small dataset (under 2,000 frames from 6 VisDrone sequences) for aerial targets as small as 8–16px — one of the hardest regimes in object detection. Expect missed detections, especially at low confidence.</p>
+          <p>Small aerial targets are one of the hardest regimes in object detection (the median person in DET-val is about 12px wide and 25px tall), and both models are under-trained: a 9.5-hour Kaggle T4 budget ended the browser model at 50 epochs and the offline model at 24. Expect missed detections, especially of small people.</p>
           <ul>
-            <li>mAP50 = 0.196 (best checkpoint, epoch 27) — training ran 100+ epochs total but loss plateaued in validation mAP past that point, a sign this dataset's signal is close to exhausted rather than an optimization issue.</li>
-            <li>Lower the confidence slider if nothing is detected; raise it if you see false positives.</li>
-            <li>The biggest remaining lever is more training data — the full VisDrone-MOT training split (56 sequences) instead of just its validation split.</li>
-            <li>Camera-motion compensation (ECC) is not ported to the browser; expect more ID switches on fast-panning footage than the Python demo clips above.</li>
+            <li>The n model (YOLO26n-P2 @960) on VisDrone DET-val: person recall 48.8%, precision 73.5%, mAP50 0.429. The offline renders above use the larger s model at 1280px (62.5% / 79.0% / 0.536).</li>
+            <li>These scores are for the n checkpoint's one-to-many head with NMS, evaluated in Python. The in-browser model uses the one-to-one NMS-free head, which was checked for export fidelity but not scored, so its accuracy may differ.</li>
+            <li>Camera-motion compensation in the browser is translation-only (no rotation or zoom); the offline renders and the reported tracking numbers use OpenCV ECC.</li>
+            <li>The browser model returns at most 300 boxes per frame, so very dense scenes lose some.</li>
+            <li>Speed depends on your device and backend (WebGPU or WASM); the FPS meter shows the live rate.</li>
+            <li>Lower the confidence slider (down to 0.4, the detector's own floor for starting a track) if objects never get a track; raise it if you see false positives. It sets the score needed to start a new track.</li>
+            <li>Trained and evaluated on VisDrone only; other altitudes, sensors and scenes were not measured.</li>
           </ul>
         </div>
       </div>
@@ -226,7 +251,7 @@
 
 <footer>
   <div class="container">
-    <p>Built with YOLOv8, ONNX Runtime Web, and a from-scratch ByteTrack implementation. <a href="https://github.com/Halok600/The-Aerial-Guardian" target="_blank" rel="noopener">Source on GitHub</a> — 100% free, static, client-side hosting.</p>
+    <p>Built with Ultralytics YOLO26, ONNX Runtime Web, and a from-scratch ByteTrack implementation. <a href="https://github.com/Halok600/The-Aerial-Guardian" target="_blank" rel="noopener">Source on GitHub</a> — 100% free, static, client-side hosting.</p>
   </div>
 </footer>
 

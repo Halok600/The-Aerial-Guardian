@@ -1,279 +1,309 @@
-"""src/tracker/byte_tracker.py — ByteTrack MOT (v2: fixed cost threshold semantics).
+"""src/tracker/byte_tracker.py — ByteTrack MOT, written from scratch (v3).
 
-BUG FIX — ID explosion root cause:
-  v1 used match_thresh as an IoU threshold:
-      if iou[r, c] >= match_thresh  →  requires 80% overlap
-  This is wrong. ByteTrack uses match_thresh as a COST threshold:
-      cost = 1 - IoU
-      accept match if cost <= match_thresh  →  IoU >= 1 - 0.8 = 0.2
+What changed vs v2 (and why):
+  * Tentative tracks: a new track gets an ID only when it is matched again on
+    the next frame, so one-frame false positives no longer burn IDs.
+  * Stage 1 matches high-score detections against tracked AND lost tracks
+    together (reference ByteTrack), instead of offering lost tracks only the
+    leftovers in a later stage.
+  * Class-group gating: association cost is infinite across groups
+    (person / vehicle / two-wheeler / tricycle). Inside a group the track's
+    displayed class is a majority vote, so pedestrian<->people flicker keeps
+    the same ID.
+  * Duplicate removal between tracked and lost pools.
+  * Unique per-group counting (a track counts after `min_hits_for_count`).
+  * The per-instance ID counter (not class-level) keeps trackers independent.
+  * Degenerate detections (zero or negative width/height) are dropped on
+    input: the Kalman filter works in (cx, cy, aspect, height) space and a
+    non-positive height makes its innovation covariance singular.
 
-  At drone altitude, a person occupies 12-30px. Even a 1-2px position
-  shift between frames drops IoU below 0.80, so v1 rejected almost every
-  match and spawned a new track each frame — causing the ID explosion.
-
-  With cost threshold 0.8 (minimum IoU = 0.20), legitimate matches are
-  accepted and ID count stays stable.
+Per frame:
+  1. predict all tracks (+ camera-motion warp)
+  2. stage 1: high dets  <-> confirmed tracked + lost   (score-fused IoU, gated)
+  3. stage 2: low dets   <-> still-unmatched tracked     (plain IoU >= 0.5, gated)
+  4. stage 3: leftover high dets <-> tentative tracks    (confirm or remove)
+  5. start tentative tracks from leftover dets with score >= new_track
+  6. expire lost tracks, remove duplicates, update unique counts
 """
-import numpy as np
+from __future__ import annotations
+
+from collections import Counter, deque
+from dataclasses import dataclass, fields
 from enum import IntEnum
-from collections import deque
-from scipy.optimize import linear_sum_assignment
-from .kalman_filter import KalmanBoxFilter
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+from src.utils.classes import GROUP_ORDER, group_of
+from .kalman_filter import KalmanFilterXYAH, tlbr_to_xyah, xyah_to_tlbr
+from .matching import fuse_score, gate_groups, iou_cost, iou_matrix, linear_assignment
 
 
 class TrackState(IntEnum):
-    NEW     = 0
+    NEW = 0
     TRACKED = 1
-    LOST    = 2
+    LOST = 2
     REMOVED = 3
 
 
-def _iou_matrix(tlbr_a: np.ndarray, tlbr_b: np.ndarray) -> np.ndarray:
-    """Vectorised IoU between [x1,y1,x2,y2] box sets. Returns N×M matrix."""
-    if len(tlbr_a) == 0 or len(tlbr_b) == 0:
-        return np.zeros((len(tlbr_a), len(tlbr_b)), dtype=np.float32)
-    ix1 = np.maximum(tlbr_a[:, None, 0], tlbr_b[None, :, 0])
-    iy1 = np.maximum(tlbr_a[:, None, 1], tlbr_b[None, :, 1])
-    ix2 = np.minimum(tlbr_a[:, None, 2], tlbr_b[None, :, 2])
-    iy2 = np.minimum(tlbr_a[:, None, 3], tlbr_b[None, :, 3])
-    inter = np.maximum(ix2 - ix1, 0) * np.maximum(iy2 - iy1, 0)
-    area_a = (tlbr_a[:, 2] - tlbr_a[:, 0]) * (tlbr_a[:, 3] - tlbr_a[:, 1])
-    area_b = (tlbr_b[:, 2] - tlbr_b[:, 0]) * (tlbr_b[:, 3] - tlbr_b[:, 1])
-    union  = area_a[:, None] + area_b[None, :] - inter
-    return np.where(union > 0, inter / union, 0.0).astype(np.float32)
+@dataclass
+class TrackerConfig:
+    """Tracker thresholds. Defaults equal configs/tracker.yaml (tuned on MOT-val); a test pins this."""
+    track_high: float = 0.4
+    track_low: float = 0.1
+    new_track: float = 0.6
+    match_thresh: float = 0.7
+    second_match_thresh: float = 0.5
+    unconfirmed_match_thresh: float = 0.7
+    max_time_lost: int = 30
+    fuse_score: bool = False
+    class_vote_window: int = 30
+    min_hits_for_count: int = 3
+
+    @classmethod
+    def from_yaml(cls, path) -> "TrackerConfig":
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        unknown = set(data) - {f.name for f in fields(cls)}
+        if unknown:
+            raise ValueError(f"unknown tracker config keys: {sorted(unknown)}")
+        return cls(**data)
 
 
-def _cxywh_to_tlbr(bbox) -> np.ndarray:
-    cx, cy, w, h = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
-    return np.array([cx - w/2, cy - h/2, cx + w/2, cy + h/2], dtype=np.float32)
+@dataclass(frozen=True, eq=False)
+class Detection:
+    tlbr: np.ndarray
+    score: float
+    cls: int
 
-
-def _associate(tracks: list, detections: list, cost_thresh: float):
-    """
-    Hungarian assignment between tracks and detections.
-
-    Cost matrix = 1 - IoU.
-    A match is accepted if cost <= cost_thresh  (i.e., IoU >= 1 - cost_thresh).
-
-    With cost_thresh=0.8 → minimum IoU = 0.20  (correct ByteTrack default)
-    With cost_thresh=0.5 → minimum IoU = 0.50  (stricter, for stage-2)
-
-    Returns (matched pairs, unmatched track indices, unmatched det indices).
-    """
-    if not tracks or not detections:
-        return [], list(range(len(tracks))), list(range(len(detections)))
-
-    t_boxes = np.array([t.kalman.tlbr for t in tracks],  dtype=np.float32)
-    d_boxes = np.array([_cxywh_to_tlbr(d[:4]) for d in detections], dtype=np.float32)
-
-    iou  = _iou_matrix(t_boxes, d_boxes)
-    cost = 1.0 - iou  # cost matrix: low = good match
-
-    row_ind, col_ind = linear_sum_assignment(cost)
-
-    matched, matched_t, matched_d = [], set(), set()
-    for r, c in zip(row_ind, col_ind):
-        # FIX: use cost threshold (not IoU threshold)
-        if cost[r, c] <= cost_thresh:
-            matched.append((r, c))
-            matched_t.add(r)
-            matched_d.add(c)
-
-    u_tracks = [i for i in range(len(tracks))     if i not in matched_t]
-    u_dets   = [i for i in range(len(detections)) if i not in matched_d]
-    return matched, u_tracks, u_dets
+    @property
+    def group(self) -> str:
+        return group_of(self.cls)
 
 
 class STrack:
-    """Single object track with Kalman state and trajectory history."""
-    _id_counter: int = 0
+    """One tracked object: Kalman state, class votes and a centre-point history for trails."""
 
-    def __init__(self, det: np.ndarray):
-        """det: [cx, cy, w, h, score]"""
-        self.kalman = KalmanBoxFilter()
-        self.kalman.initiate(det[:4].astype(np.float32))
-        self.score           = float(det[4])
-        self.state           = TrackState.NEW
-        self.track_id: int   = -1
-        self.age: int        = 1
-        self.hits: int       = 1
-        self.time_since_update: int = 0
-        self.history: deque  = deque(maxlen=50)
-        self.history.append(tuple(det[:2].astype(int)))
+    def __init__(self, det: Detection, vote_window: int = 30, history_len: int = 60):
+        self._init_tlbr = np.asarray(det.tlbr, dtype=float).copy()
+        self.mean: np.ndarray | None = None
+        self.covariance: np.ndarray | None = None
+        self.track_id = 0
+        self.state = TrackState.NEW
+        self.is_activated = False
+        self.score = float(det.score)
+        self.group = det.group
+        self._votes: deque[int] = deque([int(det.cls)], maxlen=vote_window)
+        self.history: deque[tuple[float, float]] = deque(maxlen=history_len)
+        self.frame_id = 0
+        self.start_frame = 0
+        self.hits = 0
 
-    @classmethod
-    def _next_id(cls) -> int:
-        cls._id_counter += 1
-        return cls._id_counter
+    # --- geometry -----------------------------------------------------------
+    @property
+    def tlbr(self) -> np.ndarray:
+        return self._init_tlbr.copy() if self.mean is None else xyah_to_tlbr(self.mean)
 
-    def predict(self) -> None:
-        self.kalman.predict()
-        self.age += 1
-        self.time_since_update += 1
+    @property
+    def cls(self) -> int:
+        counts = Counter(self._votes)
+        best = max(counts.values())
+        for c in reversed(self._votes):        # ties -> most recent class
+            if counts[c] == best:
+                return c
+        return self._votes[-1]
 
-    def update(self, det: np.ndarray) -> None:
-        self.kalman.update(det[:4].astype(np.float32))
-        self.score = float(det[4])
+    def _record(self) -> None:
+        x1, y1, x2, y2 = self.tlbr
+        self.history.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+
+    # --- lifecycle ------------------------------------------------------------
+    def activate(self, kf: KalmanFilterXYAH, frame_id: int) -> None:
+        self.mean, self.covariance = kf.initiate(tlbr_to_xyah(self._init_tlbr))
+        self.state = TrackState.TRACKED
+        self.frame_id = self.start_frame = frame_id
+        self.hits = 1
+        self._record()
+
+    def confirm(self, track_id: int) -> None:
+        self.track_id = track_id
+        self.is_activated = True
+
+    def predict(self, kf: KalmanFilterXYAH) -> None:
+        mean = self.mean.copy()
+        if self.state != TrackState.TRACKED:
+            mean[7] = 0.0                      # freeze height velocity while lost
+        self.mean, self.covariance = kf.predict(mean, self.covariance)
+
+    def update(self, kf: KalmanFilterXYAH, det: Detection, frame_id: int) -> None:
+        self.mean, self.covariance = kf.update(self.mean, self.covariance, tlbr_to_xyah(det.tlbr))
+        self.score = float(det.score)
+        self._votes.append(int(det.cls))
+        self.frame_id = frame_id
         self.hits += 1
-        self.time_since_update = 0
-        cx, cy = self.kalman.bbox[:2]
-        self.history.append((int(cx), int(cy)))
-        if self.state == TrackState.NEW:
-            self.state    = TrackState.TRACKED
-            self.track_id = STrack._next_id()
+        self.state = TrackState.TRACKED
+        self._record()
 
-    def re_activate(self, det: np.ndarray) -> None:
-        """Re-activate a lost track — KEEP the original track_id."""
-        self.kalman.update(det[:4].astype(np.float32))
-        self.score = float(det[4])
-        self.hits += 1
-        self.time_since_update = 0
-        self.state = TrackState.TRACKED   # restore without new ID
-        cx, cy = self.kalman.bbox[:2]
-        self.history.append((int(cx), int(cy)))
+    def apply_warp(self, warp: np.ndarray) -> None:
+        """Move the Kalman state with the camera: rotate+translate position, rotate velocity."""
+        rot, trans = warp[:2, :2], warp[:2, 2]
+        T = np.eye(8)
+        T[0:2, 0:2] = rot
+        T[4:6, 4:6] = rot
+        self.mean = T @ self.mean
+        self.mean[0:2] += trans
+        self.covariance = T @ self.covariance @ T.T
 
     def mark_lost(self) -> None:
         self.state = TrackState.LOST
 
-    def apply_cmc(self, warp: np.ndarray) -> None:
-        """Apply ECC affine warp to correct Kalman position+velocity for ego-motion."""
-        m = self.kalman.mean
-        cx, cy   = float(m[0]), float(m[1])
-        m[0] = warp[0, 0] * cx + warp[0, 1] * cy + warp[0, 2]
-        m[1] = warp[1, 0] * cx + warp[1, 1] * cy + warp[1, 2]
-        vx, vy   = float(m[4]), float(m[5])
-        m[4] = warp[0, 0] * vx + warp[0, 1] * vy   # rotation only, no translation
-        m[5] = warp[1, 0] * vx + warp[1, 1] * vy
+    def mark_removed(self) -> None:
+        self.state = TrackState.REMOVED
 
-    @property
-    def is_confirmed(self) -> bool:
-        return self.state == TrackState.TRACKED and self.track_id >= 0
+
+def _joint(a: list[STrack], b: list[STrack]) -> list[STrack]:
+    seen = {id(t) for t in a}
+    return a + [t for t in b if id(t) not in seen]
+
+
+def _sub(a: list[STrack], b: list[STrack]) -> list[STrack]:
+    drop = {id(t) for t in b}
+    return [t for t in a if id(t) not in drop]
+
+
+def _remove_duplicates(tracked: list[STrack], lost: list[STrack]):
+    if not tracked or not lost:
+        return tracked, lost
+    iou = iou_matrix(np.array([t.tlbr for t in tracked]), np.array([t.tlbr for t in lost]))
+    dup_t, dup_l = set(), set()
+    for p, q in zip(*np.where(iou > 0.85)):
+        if tracked[p].group != lost[q].group:
+            continue
+        age_t = tracked[p].frame_id - tracked[p].start_frame
+        age_l = lost[q].frame_id - lost[q].start_frame
+        if age_t > age_l:
+            dup_l.add(q)
+        else:
+            dup_t.add(p)
+    return ([t for i, t in enumerate(tracked) if i not in dup_t],
+            [t for i, t in enumerate(lost) if i not in dup_l])
 
 
 class ByteTracker:
-    """
-    ByteTrack Multi-Object Tracker.
+    def __init__(self, config: TrackerConfig | None = None, frame_rate: float = 30.0):
+        self.cfg = config or TrackerConfig()
+        self.max_time_lost = int(round(self.cfg.max_time_lost * frame_rate / 30.0))
+        self.kf = KalmanFilterXYAH()
+        self.reset()
 
-    Key parameters for drone footage
-    ----------------------------------
-    track_thresh  = 0.25  : High-conf bucket. Lowered from default 0.5 to
-                            catch faint altitude detections (conf ~0.15–0.30).
-    low_thresh    = 0.10  : Low-conf bucket floor.
-    match_thresh  = 0.80  : COST threshold (= 1 - IoU). Accepts a match when
-                            IoU >= 1 - 0.80 = 0.20. This is the standard
-                            ByteTrack default. DO NOT interpret as IoU threshold.
-    max_time_lost = 60    : 2s at 30fps. Longer window allows re-activation
-                            after occlusion by trees/buildings in drone footage.
+    def reset(self) -> None:
+        self.tracked: list[STrack] = []
+        self.lost: list[STrack] = []
+        self.frame_id = 0
+        self._last_id = 0
+        self._counted: dict[int, str] = {}
 
-    3-Stage association per frame
-    ------------------------------
-    Stage 1: high-conf dets ↔ tracked tracks  (cost_thresh=match_thresh)
-    Stage 2: low-conf  dets ↔ unmatched tracked tracks  (cost_thresh=0.5)
-    Stage 3: unmatched high-conf dets ↔ lost tracks  (cost_thresh=match_thresh)
-    """
+    @property
+    def total_ids(self) -> int:
+        return self._last_id
 
-    def __init__(
-        self,
-        track_thresh:  float = 0.25,
-        low_thresh:    float = 0.10,
-        match_thresh:  float = 0.80,   # COST threshold: IoU >= 1 - 0.80 = 0.20
-        max_time_lost: int   = 60,
-    ):
-        self.track_thresh  = track_thresh
-        self.low_thresh    = low_thresh
-        self.match_thresh  = match_thresh
-        self.max_time_lost = max_time_lost
+    def unique_counts(self) -> dict[str, int]:
+        counts = {g: 0 for g in GROUP_ORDER}
+        for g in self._counted.values():
+            counts[g] += 1
+        return counts
 
-        self.tracked_stracks: list = []
-        self.lost_stracks:    list = []
-        self.frame_id: int = 0
+    def _next_id(self) -> int:
+        self._last_id += 1
+        return self._last_id
 
-    def update(self, detections: np.ndarray, warp: np.ndarray | None = None) -> list:
-        """
-        Update tracker for one frame.
+    def _to_detections(self, dets) -> list[Detection]:
+        arr = np.asarray(dets, dtype=float).reshape(-1, 6)
+        return [Detection(row[:4].copy(), float(row[4]), int(row[5]))
+                for row in arr
+                if row[2] > row[0] and row[3] > row[1] and row[4] >= self.cfg.track_low]
 
-        Parameters
-        ----------
-        detections : np.ndarray  shape (N, 5)  [cx, cy, w, h, score]
-        warp       : 2×3 affine warp from ECC CMC (None = skip)
+    def _cost(self, tracks: list[STrack], dets: list[Detection], fuse: bool) -> np.ndarray:
+        if not tracks or not dets:
+            return np.zeros((len(tracks), len(dets)))
+        cost = iou_cost(np.array([t.tlbr for t in tracks]), np.array([d.tlbr for d in dets]))
+        if fuse:
+            cost = fuse_score(cost, [d.score for d in dets])
+        return gate_groups(cost, [t.group for t in tracks], [d.group for d in dets])
 
-        Returns list of confirmed STrack objects.
-        """
+    def update(self, dets, warp: np.ndarray | None = None) -> list[STrack]:
         self.frame_id += 1
+        cfg = self.cfg
+        detections = self._to_detections(dets)
+        high = [d for d in detections if d.score >= cfg.track_high]
+        low = [d for d in detections if d.score < cfg.track_high]
 
-        if len(detections) == 0:
-            detections = np.zeros((0, 5), dtype=np.float32)
-        else:
-            detections = np.asarray(detections, dtype=np.float32)
-
-        # Split by confidence
-        high_mask = detections[:, 4] >= self.track_thresh
-        low_mask  = (detections[:, 4] >= self.low_thresh) & ~high_mask
-        high_dets = detections[high_mask]
-        low_dets  = detections[low_mask]
-
-        # --- Predict + CMC ---
-        for t in self.tracked_stracks + self.lost_stracks:
-            t.predict()
+        unconfirmed = [t for t in self.tracked if not t.is_activated]
+        pool = _joint([t for t in self.tracked if t.is_activated], self.lost)
+        for t in pool + unconfirmed:
+            t.predict(self.kf)
             if warp is not None:
-                t.apply_cmc(warp)
+                t.apply_warp(warp)
 
-        # --- Stage 1: high-conf ↔ tracked ---
-        m1, u_t1, u_d_high = _associate(
-            self.tracked_stracks, list(high_dets), self.match_thresh)
+        activated: list[STrack] = []
+        refound: list[STrack] = []
+        lost_now: list[STrack] = []
+        removed: list[STrack] = []
 
-        matched_t1_set = {ti for ti, _ in m1}
-        for ti, di in m1:
-            self.tracked_stracks[ti].update(high_dets[di])
+        # Stage 1: high-score detections vs confirmed tracked + lost tracks.
+        matches, u_pool, u_high = linear_assignment(self._cost(pool, high, cfg.fuse_score), cfg.match_thresh)
+        for ti, di in matches:
+            t = pool[ti]
+            was_tracked = t.state == TrackState.TRACKED
+            t.update(self.kf, high[di], self.frame_id)
+            (activated if was_tracked else refound).append(t)
 
-        # --- Stage 2: low-conf ↔ unmatched tracked ---
-        # NOTE: _associate(tracks, detections, thresh) — tracks first!
-        remaining_tracked = [self.tracked_stracks[i] for i in u_t1]
-        m2, u_t2, _ = _associate(remaining_tracked, list(low_dets), 0.5)
-        for ti, di in m2:
-            remaining_tracked[ti].update(low_dets[di])
+        # Stage 2: low-score detections keep still-unmatched *tracked* tracks alive.
+        remaining = [pool[i] for i in u_pool if pool[i].state == TrackState.TRACKED]
+        matches, u_rem, _ = linear_assignment(self._cost(remaining, low, False), cfg.second_match_thresh)
+        for ti, di in matches:
+            remaining[ti].update(self.kf, low[di], self.frame_id)
+            activated.append(remaining[ti])
+        for i in u_rem:
+            remaining[i].mark_lost()
+            lost_now.append(remaining[i])
 
-        # Mark unmatched active tracks as lost
-        newly_lost = []
-        for i in u_t2:
-            remaining_tracked[i].mark_lost()
-            newly_lost.append(remaining_tracked[i])
+        # Stage 3: tentative tracks are confirmed by a second match, else removed.
+        leftover = [high[i] for i in u_high]
+        matches, u_unconf, u_left = linear_assignment(
+            self._cost(unconfirmed, leftover, cfg.fuse_score), cfg.unconfirmed_match_thresh)
+        for ti, di in matches:
+            t = unconfirmed[ti]
+            t.update(self.kf, leftover[di], self.frame_id)
+            t.confirm(self._next_id())
+            activated.append(t)
+        for i in u_unconf:
+            unconfirmed[i].mark_removed()
+            removed.append(unconfirmed[i])
 
-        # --- Stage 3: unmatched high-conf ↔ lost tracks (re-activation) ---
-        unmatched_high = high_dets[u_d_high]
-        m3, u_lost3, u_d_new = _associate(
-            self.lost_stracks, list(unmatched_high), self.match_thresh)
+        # New tentative tracks (confirmed immediately on the very first frame).
+        for i in u_left:
+            d = leftover[i]
+            if d.score < cfg.new_track:
+                continue
+            t = STrack(d, cfg.class_vote_window)
+            t.activate(self.kf, self.frame_id)
+            if self.frame_id == 1:
+                t.confirm(self._next_id())
+            activated.append(t)
 
-        recovered_set = {ti for ti, _ in m3}
-        for ti, di in m3:
-            self.lost_stracks[ti].re_activate(unmatched_high[di])
+        for t in self.lost:
+            if self.frame_id - t.frame_id > self.max_time_lost:
+                t.mark_removed()
+                removed.append(t)
 
-        # --- Init new tracks ---
-        new_stracks = []
-        for di in u_d_new:
-            det = unmatched_high[di]
-            if det[4] >= self.track_thresh:
-                t = STrack(det)
-                t.state    = TrackState.TRACKED
-                t.track_id = STrack._next_id()
-                new_stracks.append(t)
+        self.tracked = [t for t in self.tracked if t.state == TrackState.TRACKED]
+        self.tracked = _joint(_joint(self.tracked, activated), refound)
+        self.lost = _sub(self.lost, self.tracked) + lost_now
+        self.lost = _sub(self.lost, removed)
+        self.tracked, self.lost = _remove_duplicates(self.tracked, self.lost)
 
-        # --- Rebuild pools ---
-        # Tracked: matched-in-stage1 + matched-in-stage2 + recovered-lost + new
-        stage1_matched = [self.tracked_stracks[ti] for ti, _ in m1]
-        stage2_matched = [remaining_tracked[ti]    for ti, _ in m2]
-        recovered      = [self.lost_stracks[ti]    for ti, _ in m3]
-
-        self.tracked_stracks = (
-            stage1_matched + stage2_matched + recovered + new_stracks
-        )
-
-        # Lost: newly lost + still-within-time-limit lost (not recovered)
-        surviving_lost = [
-            t for i, t in enumerate(self.lost_stracks)
-            if i not in recovered_set
-            and t.time_since_update <= self.max_time_lost
-        ]
-        self.lost_stracks = newly_lost + surviving_lost
-
-        return [t for t in self.tracked_stracks if t.is_confirmed]
+        for t in self.tracked:
+            if t.is_activated and t.hits >= cfg.min_hits_for_count and t.track_id not in self._counted:
+                self._counted[t.track_id] = t.group
+        return [t for t in self.tracked if t.is_activated]

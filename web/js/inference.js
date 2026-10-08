@@ -1,150 +1,184 @@
 /**
- * inference.js — ONNX Runtime Web wrapper for the YOLOv8n-P2 "Aerial Guardian"
- * detector. Handles letterbox preprocessing, session creation with a
- * WebGPU -> WASM fallback, and NMS postprocessing matching the Python
- * pipeline's parse_detections() contract: output is [cx, cy, w, h, score]
- * in ORIGINAL image pixel coordinates.
+ * inference.js — ONNX Runtime Web wrapper for the YOLO26n-P2 VisDrone detector.
+ *
+ * Letterbox preprocessing, WebGPU -> WASM fallback, and decoding of either
+ * export layout recorded in model/model-meta.json:
+ *   end2end: [1, K, 6] rows (x1, y1, x2, y2, score, cls) in letterboxed pixels — NMS-free
+ *   raw:     [1, 4 + nc, N] (cx, cy, w, h, class scores) — class-aware NMS runs here
+ * Output of Detector.detect: Array<[x1, y1, x2, y2, score, cls]> in SOURCE pixels.
+ *
+ * Everything except the Detector class is pure (no window/document access at
+ * import time) so web/tests/inference.test.mjs can exercise it under Node.
  */
-
 const MODEL_URL = new URL('../model/aerial-guardian.onnx', import.meta.url).href;
-export const INPUT_SIZE = 960;
+const META_URL = new URL('../model/model-meta.json', import.meta.url).href;
+const PAD_GREY = 114;             // Ultralytics letterbox fill
+const MAX_RAW_CANDIDATES = 3000;  // cap before the O(n^2) NMS on the 76,500-anchor raw layout
 
-let ortModule = null;
-async function loadOrt() {
-  if (ortModule) return ortModule;
-  // Loaded from CDN in index.html as a module; re-exported on window.ort.
-  if (!window.ort) throw new Error('onnxruntime-web failed to load from CDN');
-  ortModule = window.ort;
-  ortModule.env.wasm.numThreads = 1; // avoid COOP/COEP requirement on static hosts
-  ortModule.env.wasm.simd = true;
-  return ortModule;
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/** Letterbox geometry: uniform scale to fit `size`x`size`, content centred, pad floored. */
+export function letterboxParams(srcW, srcH, size) {
+  const scale = Math.min(size / srcW, size / srcH);
+  const newW = Math.round(srcW * scale), newH = Math.round(srcH * scale);
+  return { scale, newW, newH, padX: Math.floor((size - newW) / 2), padY: Math.floor((size - newH) / 2) };
 }
 
-export class Detector {
-  constructor() {
-    this.session = null;
-    this.backend = null;
-  }
-
-  async load(onStatus) {
-    const ort = await loadOrt();
-    const attempts = [
-      { name: 'webgpu', providers: ['webgpu'] },
-      { name: 'wasm', providers: ['wasm'] },
-    ];
-    let lastErr = null;
-    for (const attempt of attempts) {
-      try {
-        onStatus?.(`Initialising ${attempt.name} backend…`);
-        this.session = await ort.InferenceSession.create(MODEL_URL, {
-          executionProviders: attempt.providers,
-          graphOptimizationLevel: 'all',
-        });
-        this.backend = attempt.name;
-        return this.backend;
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr || new Error('No available ONNX Runtime backend');
-  }
-
-  /**
-   * Letterbox-resize a source (canvas/video/image) into a square INPUT_SIZE
-   * tensor. Returns { tensor, scale, padX, padY } for un-letterboxing boxes.
-   */
-  _preprocess(source, srcW, srcH) {
-    const size = INPUT_SIZE;
-    const scale = Math.min(size / srcW, size / srcH);
-    const newW = Math.round(srcW * scale);
-    const newH = Math.round(srcH * scale);
-    const padX = Math.floor((size - newW) / 2);
-    const padY = Math.floor((size - newH) / 2);
-
-    if (!this._padCanvas) {
-      this._padCanvas = document.createElement('canvas');
-      this._padCanvas.width = size;
-      this._padCanvas.height = size;
-      this._padCtx = this._padCanvas.getContext('2d', { willReadFrequently: true });
-    }
-    const ctx = this._padCtx;
-    ctx.fillStyle = 'rgb(114,114,114)';
-    ctx.fillRect(0, 0, size, size);
-    ctx.drawImage(source, 0, 0, srcW, srcH, padX, padY, newW, newH);
-
-    const { data } = ctx.getImageData(0, 0, size, size);
-    const chw = new Float32Array(3 * size * size);
-    const plane = size * size;
-    for (let i = 0; i < plane; i++) {
-      const o = i * 4;
-      chw[i] = data[o] / 255;             // R
-      chw[plane + i] = data[o + 1] / 255; // G
-      chw[2 * plane + i] = data[o + 2] / 255; // B
-    }
-    return { data: chw, scale, padX, padY };
-  }
-
-  /**
-   * Run detection. `source` must be canvas/video/img-like and drawable via
-   * drawImage. Returns Array<[cx, cy, w, h, score]> in source pixel space.
-   */
-  async detect(source, srcW, srcH, { confThresh = 0.25, iouThresh = 0.45 } = {}) {
-    const ort = await loadOrt();
-    const { data, scale, padX, padY } = this._preprocess(source, srcW, srcH);
-    const tensor = new ort.Tensor('float32', data, [1, 3, INPUT_SIZE, INPUT_SIZE]);
-    const feeds = { [this.session.inputNames[0]]: tensor };
-    const results = await this.session.run(feeds);
-    const output = results[this.session.outputNames[0]];
-    // output: [1, 5, N] -> (cx, cy, w, h, score) x N, in INPUT_SIZE model space
-    const [, C, N] = output.dims;
-    const buf = output.data;
-
-    const boxes = [];
-    for (let i = 0; i < N; i++) {
-      const score = buf[4 * N + i];
-      if (score < confThresh) continue;
-      const cx = buf[i];
-      const cy = buf[N + i];
-      const w = buf[2 * N + i];
-      const h = buf[3 * N + i];
-      boxes.push({
-        x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2, score,
-      });
-    }
-
-    const kept = nms(boxes, iouThresh);
-
-    // Un-letterbox back to source pixel space
-    return kept.map((b) => {
-      const x1 = (b.x1 - padX) / scale;
-      const y1 = (b.y1 - padY) / scale;
-      const x2 = (b.x2 - padX) / scale;
-      const y2 = (b.y2 - padY) / scale;
-      const w = x2 - x1, h = y2 - y1;
-      return [x1 + w / 2, y1 + h / 2, w, h, b.score];
-    });
-  }
+/** Map one [x1,y1,x2,y2,score,cls] row from letterboxed pixels back to source pixels, clipped to the frame. */
+export function unletterbox([x1, y1, x2, y2, s, c], { scale, padX, padY }, srcW, srcH) {
+  const clip = (v, hi) => Math.min(hi, Math.max(0, v));
+  return [
+    clip((x1 - padX) / scale, srcW), clip((y1 - padY) / scale, srcH),
+    clip((x2 - padX) / scale, srcW), clip((y2 - padY) / scale, srcH), s, c,
+  ];
 }
 
-function nms(boxes, iouThresh) {
-  boxes.sort((a, b) => b.score - a.score);
-  const kept = [];
-  const suppressed = new Array(boxes.length).fill(false);
-  for (let i = 0; i < boxes.length; i++) {
-    if (suppressed[i]) continue;
-    const a = boxes[i];
-    kept.push(a);
-    const areaA = (a.x2 - a.x1) * (a.y2 - a.y1);
-    for (let j = i + 1; j < boxes.length; j++) {
-      if (suppressed[j]) continue;
-      const b = boxes[j];
-      const ix1 = Math.max(a.x1, b.x1), iy1 = Math.max(a.y1, b.y1);
-      const ix2 = Math.min(a.x2, b.x2), iy2 = Math.min(a.y2, b.y2);
-      const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
-      const areaB = (b.x2 - b.x1) * (b.y2 - b.y1);
-      const iou = inter / (areaA + areaB - inter);
-      if (iou > iouThresh) suppressed[j] = true;
+/** unletterbox every row and drop boxes that have no area left inside the source frame. */
+export function mapToSource(boxes, lb, srcW, srcH) {
+  const out = [];
+  for (const b of boxes) {
+    const m = unletterbox(b, lb, srcW, srcH);
+    if (m[2] > m[0] && m[3] > m[1]) out.push(m);
+  }
+  return out;
+}
+
+/** Rows (x1,y1,x2,y2,score,cls) with score >= conf from an end2end [1,K,6] tensor. */
+export function decodeEnd2End(t, conf) {
+  const K = t.dims[1], d = t.data, out = [];
+  for (let i = 0; i < K; i++) {
+    const o = 6 * i;
+    if (d[o + 4] >= conf) out.push([d[o], d[o + 1], d[o + 2], d[o + 3], d[o + 4], Math.round(d[o + 5])]);
+  }
+  return out;
+}
+
+export function iou(a, b) {
+  const inter = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]))
+    * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+/** Class-aware greedy NMS over [x1,y1,x2,y2,score,cls] rows; returns survivors by descending score. */
+export function nms(boxes, iouThresh) {
+  const order = [...boxes].sort((a, b) => b[4] - a[4]);
+  const kept = [], dead = new Array(order.length).fill(false);
+  for (let i = 0; i < order.length; i++) {
+    if (dead[i]) continue;
+    kept.push(order[i]);
+    for (let j = i + 1; j < order.length; j++) {
+      if (!dead[j] && order[j][5] === order[i][5] && iou(order[i], order[j]) > iouThresh) dead[j] = true;
     }
   }
   return kept;
+}
+
+/** Rows from a raw channel-first [1, 4+nc, N] tensor: best class per anchor, conf filter, class-aware NMS. */
+export function decodeRaw(t, conf, iouThresh) {
+  const C = t.dims[1], N = t.dims[2], d = t.data, nc = C - 4, cand = [];
+  for (let i = 0; i < N; i++) {
+    let best = 0, cls = 0;
+    for (let c = 0; c < nc; c++) { const s = d[(4 + c) * N + i]; if (s > best) { best = s; cls = c; } }
+    if (best < conf) continue;
+    const cx = d[i], cy = d[N + i], w = d[2 * N + i], h = d[3 * N + i];
+    cand.push([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, best, cls]);
+  }
+  cand.sort((a, b) => b[4] - a[4]);
+  return nms(cand.slice(0, MAX_RAW_CANDIDATES), iouThresh);
+}
+
+/** Fail loudly (with a message fit for the status line) on a malformed model-meta.json. */
+export function validateMeta(meta) {
+  if (!meta || typeof meta !== 'object') throw new Error('model-meta.json is not a JSON object');
+  if (!(Number.isInteger(meta.input_size) && meta.input_size > 0)) throw new Error('model-meta.json: bad input_size');
+  if (meta.output_format !== 'end2end' && meta.output_format !== 'raw') {
+    throw new Error(`model-meta.json: output_format must be "end2end" or "raw", got ${JSON.stringify(meta.output_format)}`);
+  }
+  if (!Array.isArray(meta.names) || meta.names.length !== 10) throw new Error('model-meta.json: names must list the 10 VisDrone classes');
+  return meta;
+}
+
+// ---------------------------------------------------------------------------
+// Browser-only: session handling
+// ---------------------------------------------------------------------------
+
+function getOrt() {
+  if (!globalThis.window?.ort) throw new Error('onnxruntime-web failed to load from the CDN (check your connection)');
+  return globalThis.window.ort;
+}
+
+async function fetchMeta() {
+  let res;
+  try { res = await fetch(META_URL, { cache: 'no-cache' }); }
+  catch (e) { throw new Error(`Could not fetch model/model-meta.json: ${e.message}`); }
+  if (!res.ok) throw new Error(`model/model-meta.json not found (HTTP ${res.status}) — the detector weights have not been deployed`);
+  let meta;
+  try { meta = await res.json(); }
+  catch (e) { throw new Error(`model/model-meta.json is not valid JSON: ${e.message}`); }
+  return validateMeta(meta);
+}
+
+export class Detector {
+  constructor() { this.session = null; this.backend = null; this.meta = null; this.canvas = null; this.ctx = null; this.chw = null; }
+
+  async load(onStatus) {
+    this.meta = await fetchMeta();
+    const ort = getOrt();
+    ort.env.wasm.numThreads = 1;   // set once; avoids the COOP/COEP requirement on static hosts
+    let lastErr = null;
+    for (const name of ['webgpu', 'wasm']) {
+      try {
+        onStatus?.(`Initialising ${name} backend…`);
+        this.session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: [name], graphOptimizationLevel: 'all' });
+        this.backend = name;
+        return name;
+      } catch (e) { lastErr = e; }
+    }
+    throw new Error(`Could not load model/aerial-guardian.onnx: ${lastErr?.message || 'no available ONNX Runtime backend'}`);
+  }
+
+  preprocess(source, srcW, srcH) {
+    const size = this.meta.input_size;
+    const lb = letterboxParams(srcW, srcH, size);
+    if (!this.canvas) {
+      this.canvas = document.createElement('canvas');
+      this.canvas.width = size; this.canvas.height = size;
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+    }
+    this.ctx.fillStyle = `rgb(${PAD_GREY},${PAD_GREY},${PAD_GREY})`;
+    this.ctx.fillRect(0, 0, size, size);
+    this.ctx.drawImage(source, 0, 0, srcW, srcH, lb.padX, lb.padY, lb.newW, lb.newH);
+    const { data } = this.ctx.getImageData(0, 0, size, size);
+    // One reusable NCHW buffer (11 MB at 960): detect() awaits session.run before the next frame is
+    // preprocessed (the app's busy gate guarantees it), so the tensor never aliases a live read.
+    const plane = size * size;
+    if (!this.chw || this.chw.length !== 3 * plane) this.chw = new Float32Array(3 * plane);
+    const chw = this.chw;
+    for (let i = 0; i < plane; i++) {
+      chw[i] = data[4 * i] / 255; chw[plane + i] = data[4 * i + 1] / 255; chw[2 * plane + i] = data[4 * i + 2] / 255;
+    }
+    return { chw, lb };
+  }
+
+  /** conf: detector score floor (keep low — ByteTrack's low-score stage needs those boxes). iou: raw layout only. */
+  async detect(source, srcW, srcH, { conf = 0.05, iou: iouThresh = 0.6 } = {}) {
+    const ort = getOrt();
+    const size = this.meta.input_size;
+    const { chw, lb } = this.preprocess(source, srcW, srcH);
+    const out = await this.session.run({ [this.session.inputNames[0]]: new ort.Tensor('float32', chw, [1, 3, size, size]) });
+    const t = out[this.session.outputNames[0]];
+    let boxes;
+    if (this.meta.output_format === 'end2end') {
+      if (t.dims.length !== 3 || t.dims[2] !== 6) throw new Error(`model output ${JSON.stringify(t.dims)} does not match the end2end layout [1,K,6]`);
+      boxes = decodeEnd2End(t, conf);
+    } else {
+      const nc = this.meta.names.length;
+      if (t.dims.length !== 3 || t.dims[1] !== 4 + nc) throw new Error(`model output ${JSON.stringify(t.dims)} does not match the raw layout [1,${4 + nc},N]`);
+      boxes = decodeRaw(t, conf, iouThresh);
+    }
+    return mapToSource(boxes, lb, srcW, srcH);
+  }
 }

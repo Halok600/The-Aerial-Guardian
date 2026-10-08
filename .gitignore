@@ -34,3 +34,10 @@ train_v*.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Built datasets, caches, kaggle staging
+datasets/
+configs/data/
+build/
+outputs/
+models/
