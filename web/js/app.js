@@ -120,7 +120,7 @@ let loopId = 0;
 let lastStamp = null;
 let lastRunWall = null;
 
-const SLOW_HINT = 'Inference is slower than the video — tracking is coarser; try the lower-resolution input or a faster device.';
+const SLOW_HINT = 'Inference is slower than the video — tracking is coarser; try a lower-resolution video or a faster device.';
 
 let statusKind = '';
 function setStatus(msg, kind = '') {

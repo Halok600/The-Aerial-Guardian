@@ -5,18 +5,18 @@ written from scratch, and camera-motion compensation, with a live demo that runs
 
 ![Tracked VisDrone clip: class-coloured boxes with IDs, fading trails and per-group unique counts](docs/media/hero.gif)
 
-**Live demo:** [halok600.github.io/The-Aerial-Guardian](https://halok600.github.io/The-Aerial-Guardian/), no server,
-no upload, no sign-up.
+**Live demo:** [halok600.github.io/The-Aerial-Guardian](https://halok600.github.io/The-Aerial-Guardian/), no inference
+server, no upload, no sign-up.
 
 ## Highlights
 
-- **10-class drone detection with a P2 head.** An extra stride-4 detection level for objects 8 to 16 px across, on
-  YOLO26 (pedestrian, people, bicycle, car, van, truck, tricycle, awning-tricycle, bus, motor).
-- **ByteTrack written from scratch**, with tentative tracks (a one-frame false positive never gets an ID), class-group
+- **10-class drone detection with a P2 head.** An extra stride-4 detection level for small targets (the median person in DET-val is
+  about 12 px wide and 25 px tall), on YOLO26 (pedestrian, people, bicycle, car, van, truck, tricycle, awning-tricycle, bus, motor).
+- **ByteTrack written from scratch**, with tentative tracks (after the first frame, a one-frame false positive never gets an ID), class-group
   gating (a person can never take over a car's ID), majority-vote class labels and duplicate removal.
 - **Camera-motion compensation.** OpenCV ECC estimates how the drone moved between frames and every Kalman prediction is
   moved with it. On MOT-test-dev it cuts person ID switches from 1,443 to 577 and vehicle ID switches from 1,046 to 181.
-- **Runs in the browser, no server.** A YOLO26n-P2 ONNX model on ONNX Runtime Web (WebGPU, falling back to WASM), a
+- **Runs in the browser, no inference server.** A YOLO26n-P2 ONNX model on ONNX Runtime Web (WebGPU, falling back to WASM), a
   JavaScript port of the tracker tested against the Python one, and a translation-only motion estimator.
 
 ## Results
@@ -45,7 +45,7 @@ no upload, no sign-up.
 The v1 model has one class and v2 has ten, so their mAPs are not comparable; both are scored on the same person
 yardstick instead: on the 548 DET-val images, person predictions at confidence 0.25 are matched one-to-one to the 13,969
 pedestrian + people ground-truth boxes at IoU 0.5, after dropping predictions that lie mostly (IoA > 0.5) inside a VisDrone
-ignored region. mAP and per-class AP50 come from Ultralytics `val` with its default settings.¹
+ignored region. mAP and per-class AP50 come from Ultralytics `val` with its default settings except `imgsz` and `max_det=1000` (so its NMS IoU is Ultralytics' default 0.7, not the 0.6 of the tracking pipeline).¹
 
 **Both v2 models are under-trained.** Each had a 9.5 h training budget on a Kaggle T4 GPU. `epochs=300` was only an upper
 bound: Ultralytics' `time=` budget recomputes the epoch count so the cosine learning-rate schedule finishes in time, which
@@ -95,8 +95,10 @@ sequence-combined numbers ([copy of the tables](docs/results/mot_table.md)).
   practically tied (52.24 for the winner, 52.20 for the next two). [Tuning table](docs/results/mot_tuning.md).
 - Results vary by sequence and a few are worse than the baseline: person HOTA on `uav0000161_00000_v` is 25.2 with ECC
   against 32.2 for Ultralytics' default config, and vehicle HOTA on `uav0000073_00600_v` is 0.0 for every row that uses
-  my thresholds (Ultralytics' default config gets 38.4). Since Ultralytics' tracker with my thresholds also scores 0.0
-  there, the thresholds look like the cause rather than the tracker code, but I have not investigated it.
+  my thresholds (Ultralytics' default config gets 38.4). That sequence has only 13 vehicle ground-truth boxes in total, so the
+  0.0 is a tiny-sample effect with negligible weight in the pooled numbers; person HOTA on `uav0000188_00000_v` is also
+  slightly lower with ECC (17.5 against 18.2). Since Ultralytics' tracker with my thresholds also scores 0.0 on
+  `uav0000073_00600_v`, the thresholds look like the cause rather than the tracker code, but I have not investigated it.
   [Per-sequence HOTA](docs/results/mot_per_seq.md).
 
 ## Pipeline
@@ -124,11 +126,11 @@ alive, and only boxes scoring at least `new_track` (0.6) can start a track. All 
 ## What changed in v2 (and why)
 
 v1 detected people poorly, and the cause was mostly not the tracker. Re-scored with the yardstick above, the v1 model finds
-2.8% of persons on DET-val. These are the causes I found and what replaced them:
+2.8% of persons on DET-val. These are the causes I found or suspect, and what replaced them:
 
 | v1 problem | v2 fix |
 |---|---|
-| **Trained from scratch by mistake.** `YOLO("model.yaml").train(pretrained=True)` loads no weights in Ultralytics 8.0.x: weights are only passed on when the model came from a `.pt`. The run converged to something detector-shaped and nothing looked broken. | The notebook builds the P2 architecture, loads the YOLO26 checkpoint and **asserts that the backbone transferred** before spending GPU time. The n training run logged `290/757 tensors (38%); backbone 200/200`; the P2 branch and the 10-class output layers have no counterpart in the 80-class donor. |
+| **Probably trained from scratch by mistake.** As far as I can tell from reading the Ultralytics 8.0.x source, `YOLO("model.yaml").train(pretrained=True)` loads no weights: weights are only passed on when the model came from a `.pt`. I did not reproduce the v1 run or re-check this on the current Ultralytics. The run converged to something detector-shaped and nothing looked broken. | The notebook builds the P2 architecture, loads the YOLO26 checkpoint and **asserts that the backbone transferred** before spending GPU time. The n training run logged `290/757 tensors (38%); backbone 200/200`; the P2 branch and the 10-class output layers have no counterpart in the 80-class donor. |
 | **Tiny data.** 1,978 frames from 6 sequences of the VisDrone-MOT *val* split. | VisDrone2019-DET-train (6,471 images) plus every 5th frame of the 56 VisDrone2019-MOT-train sequences. DET-val and MOT-test-dev are never trained on. |
 | **Person-only, with "people" dropped.** Seated or riding people (VisDrone's "people" class) were left unlabelled, so the model learned to call them background. | All ten classes are kept, and ignored regions are greyed out in training images so unlabelled objects are not taught as background. |
 | **Tracker thresholds.** The first tracker compared IoU with a *cost* threshold (demanding 80% overlap), and its thresholds were never tuned. | Thresholds are tuned on MOT-val (see Results). The tracker also gained tentative tracks, box-height-scaled Kalman noise, lost tracks matched in the first stage, duplicate removal and an aspect-correct ECC rescale. |
@@ -165,7 +167,7 @@ The tracked video is written to `outputs/videos/<name>_tracked.mp4`. `--weights`
 
 ## Reproduce
 
-Install the development extras (`pip install -r requirements-dev.txt`: pytest, Kaggle CLI, TrackEval, ffmpeg) and set up
+Install the development extras (`pip install -r requirements-dev.txt`: pytest, jupytext, Kaggle CLI, TrackEval, lap, onnxslim and an ffmpeg wheel) and set up
 Kaggle API credentials.
 
 **1. Evaluation data** (training data is downloaded inside the Kaggle notebook):
@@ -194,12 +196,18 @@ The notebook saves `yolo26{n,s}-p2-visdrone.pt` to its output; copy it to `model
 **3. Evaluation** (outputs go to `outputs/eval/`, which is not committed; copies are in [docs/results/](docs/results/)):
 
 ```bash
-python scripts/04_eval_det.py --weights models/weights/yolo26s-p2-visdrone.pt --imgsz 1280
+python scripts/04_eval_det.py --weights models/weights/yolo26s-p2-visdrone.pt --imgsz 1280 \
+    --old-onnx outputs/old-model.onnx
 python scripts/04_eval_det.py --weights models/weights/yolo26n-p2-visdrone.pt --imgsz 960 \
-    --label "v2 YOLO26n-P2" --out outputs/eval/det_n
+    --label "v2 YOLO26n-P2" --out outputs/eval/det_n --old-onnx ''
 python scripts/05_eval_mot.py --tune --split data/visdrone/VisDrone2019-MOT-val   # MOT-val only; refuses test splits
 python scripts/05_eval_mot.py                                                      # report on MOT-test-dev
 ```
+
+The v1 row needs the old person-only model, which is not in the repository: extract it from the pre-v2 history with
+`git show <old-commit>:web/model/aerial-guardian.onnx > outputs/old-model.onnx`. `--old-onnx` defaults to
+`web/model/aerial-guardian.onnx`, which in this repository is now the v2 n model, so always pass it explicitly: the path to
+the old model, or `--old-onnx ''` to skip the v1 row (as in the n command above).
 
 **4. Browser model and showcase:**
 

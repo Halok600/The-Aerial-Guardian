@@ -149,7 +149,7 @@ new one as a whole, not each change separately.
 
 ### 3.3 Pretrained weights and the transfer check
 
-The first version of this project trained from scratch by mistake. With Ultralytics 8.0.x, my reading of the training
+The first version of this project most likely trained from scratch by mistake. With Ultralytics 8.0.x, my reading of the training
 code was that `YOLO("model.yaml").train(pretrained=True)` loads no weights: `Model.train()` hands weights to the
 trainer only when the model was created from a `.pt` file. The run logged no error, converged to something
 detector-shaped, and produced an mAP50 of 0.196. I have not re-checked this on 8.4.174; the notebook no longer depends
@@ -454,7 +454,8 @@ TrackEval (HOTA, CLEAR MOTA, Identity IDF1, plus ID switches) through
 [src/eval/trackeval_runner.py](../src/eval/trackeval_runner.py). The tables report the pooled sequence-combined
 numbers (so long and crowded sequences weigh more), and a second per-sequence table shows HOTA per sequence. Two
 groups are scored, each as its own TrackEval benchmark: **person** (ground truth pedestrian (1) + people (2) against the
-person tracker group) and **vehicle** (car (4) + van (5) + truck (6) + bus (9) against the vehicle group). Two-wheelers
+person tracker group) and **vehicle** (car (4) + van (5) + truck (6) + bus (9) against the vehicle group; these are VisDrone category
+ids, the web code's class indices for the same group are 3, 4, 5, 8). Two-wheelers
 and tricycles are tracked and drawn but not scored. VisDrone's per-box truncation and occlusion flags are deliberately not
 used to filter ground truth, and TrackEval runs with `DO_PREPROC=False` (its preprocessing only removes distractor
 classes, and each group file has a single class).
@@ -591,7 +592,7 @@ the detector always runs at 0.05.
 
 ## 8. Lessons learned
 
-### 8.1 The detector was trained from scratch
+### 8.1 The detector was (probably) trained from scratch
 
 The original README reported mAP50 0.196, recall 14.5% and precision 62.7% for the person-only YOLOv8n-P2 model, on
 a small split drawn from six VisDrone sequences (1,978 train and 275 validation frames, all from the MOT-val split).
