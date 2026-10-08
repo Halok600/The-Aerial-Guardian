@@ -40,7 +40,7 @@ const io = new IntersectionObserver(
 document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
 
 // ---------------------------------------------------------------------
-// ID -> color (golden-angle hue), mirrors src/utils/visualizer.py.
+// ID -> color (golden-angle hue); the offline renders use a similar but not identical palette.
 // Used for trails only; boxes and labels take their colour from the class group.
 // ---------------------------------------------------------------------
 const colorCache = new Map();
@@ -120,7 +120,7 @@ let loopId = 0;
 let lastStamp = null;
 let lastRunWall = null;
 
-const SLOW_HINT = 'Inference is slower than the video — tracking is coarser; try a lower-resolution video or a faster device.';
+const SLOW_HINT = 'Inference is slower than the video — tracking is coarser; try a faster device or a browser with WebGPU, or a shorter, low-motion clip.';
 
 let statusKind = '';
 function setStatus(msg, kind = '') {

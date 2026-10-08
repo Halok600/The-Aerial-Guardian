@@ -86,3 +86,11 @@ test('one-frame false positive burns no ID', () => {
   tracker.update([box(104, 100, 30, 60)]);
   assert.equal(tracker.totalIds, 1);
 });
+
+test('the new-track slider cannot go below the detection floor that gates track creation', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const m = html.match(/id="confSlider"[^>]*\smin="([\d.]+)"/);
+  assert.ok(m, 'confSlider with a min attribute');
+  assert.equal(parseFloat(m[1]), DEFAULT_CONFIG.track_high);
+  assert.ok(DEFAULT_CONFIG.new_track >= DEFAULT_CONFIG.track_high);
+});

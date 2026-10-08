@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import pytest
 
-from src.utils.video_io import AsyncWriter, FramePrefetcher
+from src.utils.video_io import AsyncWriter, FramePrefetcher, sane_fps
 
 
 def _folder(tmp_path, n=3, w=64, h=48):
@@ -121,3 +121,38 @@ def test_writer_rejects_mismatched_frame_size(tmp_path):
             w.write(np.zeros((48, 65, 3), np.uint8))
     finally:
         w.release()
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (25.0, 25.0), (29.97, 29.97), (240.0, 240.0),
+    (float("nan"), 30.0), (float("inf"), 30.0), (0.0, 30.0), (-5.0, 30.0), (1000.0, 30.0), (None, 30.0),
+])
+def test_sane_fps(raw, expected):
+    assert sane_fps(raw) == expected
+
+
+@pytest.mark.parametrize("reported", [float("nan"), 1000.0])
+def test_prefetcher_uses_default_fps_for_invalid_container_fps(tmp_path, monkeypatch, reported):
+    path = tmp_path / "clip.mp4"
+    w = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 25.0, (64, 48))
+    assert w.isOpened()
+    for _ in range(3):
+        w.write(np.zeros((48, 64, 3), np.uint8))
+    w.release()
+
+    real_cap = cv2.VideoCapture
+
+    class Cap:
+        def __init__(self, *a):
+            self._c = real_cap(*a)
+
+        def get(self, prop):
+            return reported if prop == cv2.CAP_PROP_FPS else self._c.get(prop)
+
+        def __getattr__(self, name):
+            return getattr(self._c, name)
+
+    monkeypatch.setattr(cv2, "VideoCapture", Cap)
+    with FramePrefetcher(path) as src:
+        assert src.fps_native == 30.0
+        _consume_in_thread(src)

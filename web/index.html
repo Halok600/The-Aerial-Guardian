@@ -151,7 +151,7 @@
           <div class="panel-title">Settings</div>
           <div class="field">
             <label>New-track confidence <span class="fv" id="confVal">0.60</span></label>
-            <input type="range" id="confSlider" min="0.2" max="0.9" step="0.05" value="0.6">
+            <input type="range" id="confSlider" min="0.4" max="0.9" step="0.05" value="0.6">
           </div>
           <div class="field">
             <label>Trail length <span class="fv" id="trailVal">30</span></label>
@@ -181,7 +181,7 @@
       <div class="panel pipe-card">
         <div class="pipe-num">01</div>
         <h4>Detect — YOLO26-P2</h4>
-        <p>A stride-4 detection level on top of the standard P3/P4/P5 heads — a 240×240 grid at the browser's 960px input — for small targets — the median pedestrian in DET-val is only about 12px wide and 25px tall, which a stride-8 grid covers with just one or two cells across. Ten VisDrone classes, exported NMS-free for the browser.</p>
+        <p>A stride-4 detection level on top of the standard P3/P4/P5 heads — a 240×240 grid at the browser's 960px input, for small targets: the median pedestrian in DET-val is only about 12px wide and 25px tall, which a stride-8 grid covers with just one or two cells across. Ten VisDrone classes, exported NMS-free for the browser.</p>
         <span class="tag">10 classes</span>
       </div>
       <div class="panel pipe-card">
@@ -240,7 +240,7 @@
             <li>Camera-motion compensation in the browser is translation-only (no rotation or zoom); the offline renders and the reported tracking numbers use OpenCV ECC.</li>
             <li>The browser model returns at most 300 boxes per frame, so very dense scenes lose some.</li>
             <li>Speed depends on your device and backend (WebGPU or WASM); the FPS meter shows the live rate.</li>
-            <li>Lower the confidence slider if objects never get a track; raise it if you see false positives. It sets the score needed to start a new track.</li>
+            <li>Lower the confidence slider (down to 0.4, the detector's own floor for starting a track) if objects never get a track; raise it if you see false positives. It sets the score needed to start a new track.</li>
             <li>Trained and evaluated on VisDrone only; other altitudes, sensors and scenes were not measured.</li>
           </ul>
         </div>
