@@ -64,6 +64,14 @@ def test_h264_args_are_web_safe(mod, tmp_path):
     assert "-an" in args
 
 
+def test_gif_defaults_match_committed_hero_gif_settings(mod):
+    import inspect
+    vf = mod.gif_vf()
+    assert vf.startswith("fps=10,") and "min(600,iw)" in vf
+    assert "palettegen=max_colors=64" in vf and "paletteuse=dither=bayer:bayer_scale=5" in vf
+    assert inspect.signature(mod.gif).parameters["seconds"].default == 6.0
+
+
 def test_ffmpeg_failure_surfaces_stderr(mod, tmp_path):
     with pytest.raises(RuntimeError, match="ffmpeg failed"):
         mod.h264(tmp_path / "does-not-exist.mp4", tmp_path / "out.mp4")
