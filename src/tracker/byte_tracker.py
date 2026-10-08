@@ -49,14 +49,15 @@ class TrackState(IntEnum):
 
 @dataclass
 class TrackerConfig:
+    """Tracker thresholds. Defaults equal configs/tracker.yaml (tuned on MOT-val); a test pins this."""
     track_high: float = 0.4
     track_low: float = 0.1
-    new_track: float = 0.5
-    match_thresh: float = 0.8
+    new_track: float = 0.6
+    match_thresh: float = 0.7
     second_match_thresh: float = 0.5
     unconfirmed_match_thresh: float = 0.7
     max_time_lost: int = 30
-    fuse_score: bool = True
+    fuse_score: bool = False
     class_vote_window: int = 30
     min_hits_for_count: int = 3
 

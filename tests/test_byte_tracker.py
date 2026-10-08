@@ -115,6 +115,10 @@ def test_config_from_yaml(tmp_path):
     assert TrackerConfig.from_yaml("configs/tracker.yaml").track_low == 0.1
 
 
+def test_dataclass_defaults_equal_tracker_yaml():
+    assert TrackerConfig() == TrackerConfig.from_yaml("configs/tracker.yaml")
+
+
 def test_degenerate_boxes_are_dropped_before_tracking():
     good = box(100, 200, 30, 60)
     zero_height = [300.0, 400.0, 340.0, 400.0, 0.9, 0]    # y2 == y1

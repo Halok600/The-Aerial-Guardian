@@ -261,9 +261,9 @@ height are dropped on input, since `h <= 0` makes the innovation covariance sing
 flowchart TD
   A["detections"] --> B["drop degenerate boxes and score below track_low<br/>split: high at or above track_high, low otherwise"]
   B --> C["predict all tracks, then apply the camera warp"]
-  C --> S1["Stage 1: high dets vs confirmed tracked + lost tracks<br/>cost = 1 - IoU fused with score, class-group gated, at most match_thresh"]
+  C --> S1["Stage 1: high dets vs confirmed tracked + lost tracks<br/>cost = 1 - IoU (score-fused only if fuse_score), class-group gated, at most match_thresh"]
   S1 --> S2["Stage 2: low dets vs still-unmatched TRACKED tracks<br/>cost = 1 - IoU (no fusion), gated, at most second_match_thresh"]
-  S1 --> S3["Stage 3: leftover high dets vs tentative tracks<br/>fused, gated, at most unconfirmed_match_thresh"]
+  S1 --> S3["Stage 3: leftover high dets vs tentative tracks<br/>stage-1 cost, gated, at most unconfirmed_match_thresh"]
   S2 --> L["unmatched tracked tracks become LOST"]
   S3 --> N1["matched: confirm and assign the next ID"]
   S3 --> N2["unmatched tentative: removed"]
@@ -278,7 +278,8 @@ Implemented in `ByteTracker.update` ([byte_tracker.py](../src/tracker/byte_track
 
 - Stage 1 is a single Hungarian assignment (`scipy.optimize.linear_sum_assignment`) over the joint pool of tracked and
   lost tracks, as in the reference ByteTrack, so lost tracks compete directly with tracked ones. The cost is `1 - IoU`,
-  optionally fused with the score (`1 - IoU * score`); a pair is accepted when cost <= `match_thresh`.
+  optionally fused with the score (`1 - IoU * score`, when `fuse_score` is true; the tuned configuration turns it off); a
+  pair is accepted when cost <= `match_thresh`.
 - Stage 2 offers low-score detections (`track_low <= score < track_high`) only to tracks that are still tracked, with
   plain `1 - IoU <= second_match_thresh` (IoU >= 0.5). A weak box is enough to keep a visible track alive, not to resurrect a
   lost one. Tracked tracks that find nothing become lost.
@@ -317,35 +318,41 @@ is `round(12.5) = 12`, not 13. JavaScript's `Math.round` rounds halves up, so th
 
 ### 4.7 Worked example
 
-Three frames, default configuration, boxes `[x1, y1, x2, y2]`. These are the tracker's actual outputs on this input.
+Three frames, default configuration (the values in `configs/tracker.yaml`, 4.8), boxes `[x1, y1, x2, y2]`. These are the
+tracker's actual outputs on this input.
 
 | Frame | Detections | What happens |
 |---|---|---|
-| 1 | car `[100,100,160,140]` 0.90; pedestrian `[300,200,312,230]` 0.60; pedestrian `[500,100,520,140]` 0.30 | The car and the 0.60 pedestrian pass `new_track` (0.5) and are confirmed immediately as IDs 1 and 2. The 0.30 box is a low detection with no track to match: discarded. |
-| 2 | car `[104,100,164,140]` 0.90; "people" `[300,201,312,231]` 0.30; pedestrian `[400,400,420,430]` 0.60 | Stage 1: the car matches ID 1 (IoU with the prediction 0.875, fused cost about 0.21 <= 0.8) and the Kalman state moves 3.5 px (not 4): the filter blends prediction and measurement. The 0.30 box is low, so stage 2 matches it to ID 2 (IoU 0.94) and the class votes become `[pedestrian, people]`, a tie, so the most recent, "people", is shown. The 0.60 box at `[400,400,...]` has no match: it becomes a tentative track and is not drawn. |
+| 1 | car `[100,100,160,140]` 0.90; pedestrian `[300,200,312,230]` 0.60; pedestrian `[500,100,520,140]` 0.30 | The car and the 0.60 pedestrian reach `new_track` (0.6; the test is `>=`) and are confirmed immediately as IDs 1 and 2. The 0.30 box is a low detection with no track to match: discarded. |
+| 2 | car `[104,100,164,140]` 0.90; "people" `[300,201,312,231]` 0.30; pedestrian `[400,400,420,430]` 0.60 | Stage 1: the car matches ID 1 (IoU with the prediction 0.875, cost `1 - IoU` = 0.125 <= 0.7) and the Kalman state moves 3.5 px (not 4): the filter blends prediction and measurement. The 0.30 box is low, so stage 2 matches it to ID 2 (IoU 0.94) and the class votes become `[pedestrian, people]`, a tie, so the most recent, "people", is shown. The 0.60 box at `[400,400,...]` has no match: it becomes a tentative track and is not drawn. |
 | 3 | car `[108,100,168,140]` 0.85; pedestrian `[300,202,312,232]` 0.55; pedestrian `[401,400,421,430]` 0.60 | The car and the pedestrian match in stage 1 (ID 2's votes are now `[pedestrian, people, pedestrian]`, so the label returns to "pedestrian" with the same ID). The `[401,400,...]` box is matched by stage 3 to the tentative track, which is confirmed as ID 3 (consecutive: no ID was spent on the unmatched 0.30 box). Tracks 1 and 2 now have three hits and are counted: `{person: 1, vehicle: 1}`; track 3 has two hits. |
 
 ### 4.8 Configuration
 
 [configs/tracker.yaml](../configs/tracker.yaml) holds every threshold, loaded by `TrackerConfig.from_yaml`
-(unknown keys raise). The file is tuned on MOT-val only; the values the reported run used are stated in the README.
+(unknown keys raise). The values are tuned on MOT-val only (6.5) and are the ones behind the reported tracking numbers
+([README, Results](../README.md#results)). The `TrackerConfig` dataclass defaults are the same values, so `ByteTracker()`
+without a config behaves like the file; a pytest pins the two together, and the JavaScript `DEFAULT_CONFIG` in
+[web/js/tracker.js](../web/js/tracker.js) is pinned to the file by the parity fixtures (7.1).
 
 | Key | Default | Meaning |
 |---|---|---|
 | `track_high` | 0.4 | Detections at or above this are "high": stage 1, and may start tracks |
 | `track_low` | 0.1 | Detections below this are discarded; `[track_low, track_high)` feed stage 2 |
-| `new_track` | 0.5 | Minimum score to start a tentative track |
-| `match_thresh` | 0.8 | Stage-1 cost threshold: accepted when `1 - IoU(*score) <= 0.8` |
+| `new_track` | 0.6 | Minimum score to start a tentative track |
+| `match_thresh` | 0.7 | Stage-1 cost threshold: accepted when `1 - IoU <= 0.7`, i.e. IoU >= 0.3 |
 | `second_match_thresh` | 0.5 | Stage-2 cost threshold for low boxes (IoU >= 0.5) |
 | `unconfirmed_match_thresh` | 0.7 | Stage-3 cost threshold for tentative tracks |
 | `max_time_lost` | 30 | Frames a lost track survives, at 30 fps; scaled by the source frame rate |
-| `fuse_score` | true | Multiply IoU similarity by the detection score in stages 1 and 3 |
+| `fuse_score` | false | If true, multiply IoU similarity by the detection score in stages 1 and 3 |
 | `class_vote_window` | 30 | Matched detections that vote for the displayed class |
 | `min_hits_for_count` | 3 | Matches before a track enters the unique totals |
 
-`match_thresh` is a *cost* threshold. Its value 0.8 corresponds to a minimum IoU of 0.2, not 0.8; reading it as
+`match_thresh` is a *cost* threshold. Its value 0.7 corresponds to a minimum IoU of 0.3, not 0.7; reading it as
 an IoU threshold was an early bug (8.2). Only `track_high`, `new_track`, `max_time_lost`, `match_thresh` and
-`fuse_score` are in the tuning grid (6.5).
+`fuse_score` are in the tuning grid (6.5). The tuned `new_track` (0.6) is the top of its grid range, and the best variants
+were within a few hundredths of a HOTA point of each other, so these values are a reasonable choice rather than a sharp
+optimum.
 
 ---
 
@@ -402,8 +409,8 @@ Per frame on CPU, with the pyramid, ECC took roughly 6-11 ms depending on resolu
 measurement on MOT-val frames at 720p and 1080p on the development machine, not a committed benchmark, and the
 repository has no script for it. One caveat: when ECC fails to converge it returns the identity after only a few
 milliseconds, so timing frames where it fails understates the cost. At 30 fps the budget is 33 ms per frame, so ECC is
-affordable next to the detector. Whether it improves tracking on real VisDrone footage is measured by the `ours_nocmc`
-and `ours_cmc` rows of the evaluation table (see README, Results), not asserted here.
+affordable next to the detector. Whether it improves tracking on real VisDrone footage is measured by the "Ours (no camera-motion
+comp.)" and "Ours + ECC" rows of the evaluation table ([README, Results](../README.md#results)), not asserted here.
 
 ### 5.6 The browser estimator
 
@@ -572,7 +579,8 @@ the detector always runs at 0.05.
   head plus NMS (3.2, 3.6). The one-to-one path is verified for export fidelity (3.7) but not scored separately.
 - The exported model returns at most K = 300 rows per frame; the Python pipeline uses `max_det=1000`, so extremely
   dense scenes are capped in the browser. The n-P2 model at 960 px is also weaker than the s-P2 model at 1280 px used for
-  the offline renders and the evaluation tables; browser frame rates depend on the device and are reported in the README.
+  the offline renders and the evaluation tables; browser frame rates depend on the device and backend and have not
+  been benchmarked; the page shows a live FPS meter.
 - The end-to-end graph was only seen to create a WebGPU session in headless Chrome on one machine, numerical agreement
   between the WebGPU and WASM backends was not tested, and the WASM fallback was run in Node rather than in a browser; the page
   falls back automatically if the WebGPU session cannot be created.
@@ -642,5 +650,5 @@ tracker scores 97.5 HOTA (person) on the uncrowded sequence and above 80 pooled 
 2.8% of persons. The tracker is not solved, though: crowds of tiny boxes still produce many ID switches (77 on one sequence).
 Second, because the camera moves, 10 px boxes lose overlap between frames (5.1) and thresholds only partly compensate;
 that motion is the likely main cause of those switches, which motivated the ECC stage, but I did not repeat the oracle run
-with real ECC warps. The ECC benefit is measured on detector output by the `ours_nocmc` and `ours_cmc` rows of the report
-(see README, Results).
+with real ECC warps. The ECC benefit is measured on detector output by the "Ours (no camera-motion comp.)" and "Ours + ECC" rows
+of the report ([README, Results](../README.md#results)).
