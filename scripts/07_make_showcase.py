@@ -61,9 +61,17 @@ def h264(src: Path, dst: Path, width: int = 1280) -> None:
     run_ffmpeg(h264_args(src, dst, width))
 
 
-def gif(src: Path, dst: Path, seconds: float = 8.0, width: int = 720) -> None:
-    vf = (f"fps=12,scale='min({width},iw)':-1:flags=lanczos,split[a][b];"
-          "[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer")
+def gif_vf(width: int = 600, fps: int = 10, max_colors: int = 64, bayer_scale: int = 5) -> str:
+    """ffmpeg filter graph for the README GIF. With gif()'s 6 s, these defaults reproduce the
+    committed docs/media/hero.gif from demo1.mp4 (about 5 MB, under the 6 MB budget)."""
+    return (f"fps={fps},scale='min({width},iw)':-1:flags=lanczos,split[a][b];"
+            f"[a]palettegen=max_colors={max_colors}[p];"
+            f"[b][p]paletteuse=dither=bayer:bayer_scale={bayer_scale}")
+
+
+def gif(src: Path, dst: Path, seconds: float = 6.0, width: int = 600, fps: int = 10,
+        max_colors: int = 64, bayer_scale: int = 5) -> None:
+    vf = gif_vf(width, fps, max_colors, bayer_scale)
     run_ffmpeg(["-t", str(seconds), "-i", str(src), "-vf", vf, str(dst)])
 
 
@@ -104,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--weights", default="models/weights/yolo26s-p2-visdrone.pt")
     p.add_argument("--max-frames", type=int, default=450)
     p.add_argument("--raw", action="store_true", help="untracked clip for the live demo's sample button")
-    p.add_argument("--gif", action="store_true", help="also write hero.gif (8 s) from the clip")
+    p.add_argument("--gif", action="store_true", help="also write hero.gif (6 s) from the clip")
     p.add_argument("--demo-dir", type=Path, default=DEMO, help="Where the mp4 is written.")
     p.add_argument("--media-dir", type=Path, default=MEDIA, help="Where hero.gif is written.")
     return p
